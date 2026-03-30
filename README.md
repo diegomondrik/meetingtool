@@ -17,7 +17,7 @@ Supports Claude, ChatGPT, and Gemini. Works on Windows, macOS, and Linux.
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url>
+git clone https://github.com/diegomondrik/meetingtool.git
 cd meetingtool
 
 # 2. Run setup (installs dependencies, creates folder structure, writes config)
