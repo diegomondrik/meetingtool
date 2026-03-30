@@ -561,16 +561,31 @@ class SettingsWindow(BaseWindow):
     """Simple settings window to update global config."""
 
     def __init__(self, parent, config: dict, on_save=None):
-        super().__init__(parent, "Settings", width=540, height=480)
+        super().__init__(parent, "Settings", width=540, height=500)
         self.config = config
         self.on_save = on_save
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
 
     def _build(self):
         self._header(self, "Settings", "Update your MeetingTool preferences.")
 
-        # Scrollable content
+        # ── Footer FIRST — anchors to bottom before canvas takes remaining space ──
+        footer = tk.Frame(self, bg=COLORS["bg"], pady=12)
+        footer.pack(fill="x", side="bottom")
+
+        self._secondary_button(footer, "Cancel", self.destroy).pack(
+            side="right", padx=8
+        )
+        self._primary_button(footer, "Save changes", self._save).pack(
+            side="right", padx=(PAD["window"], 0)
+        )
+
+        tk.Frame(self, bg=COLORS["border"], height=1).pack(
+            fill="x", side="bottom"
+        )
+
+        # ── Scrollable content AFTER footer (fills remaining space) ──
         canvas = tk.Canvas(self, bg=COLORS["bg_card"], highlightthickness=0)
         scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
         content = tk.Frame(canvas, bg=COLORS["bg_card"])
@@ -580,8 +595,8 @@ class SettingsWindow(BaseWindow):
         )
         canvas.create_window((0, 0), window=content, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
 
         self._section_label(content, "Installation folder")
         self._var_root = self._labeled_field(
@@ -621,7 +636,6 @@ class SettingsWindow(BaseWindow):
             default="cowork" if self.config.get("cowork_mode", False) else "web"
         )
 
-        # Hide cowork frame if provider is not Claude
         if self.config.get("llm_provider", "claude") != "claude":
             self._cowork_frame.pack_forget()
 
@@ -632,15 +646,15 @@ class SettingsWindow(BaseWindow):
             default=self.config.get("default_language", "english")
         )
 
-        footer = tk.Frame(self, bg=COLORS["bg"], pady=12)
-        footer.pack(fill="x", side="bottom")
-
-        self._secondary_button(footer, "Cancel", self.destroy).pack(
-            side="right", padx=8
-        )
-        self._primary_button(footer, "Save", self._save).pack(
-            side="right", padx=(PAD["window"], 0)
-        )
+    def _on_close(self):
+        """Ask user to save before closing if they press X."""
+        if messagebox.askyesno(
+            "Save changes?",
+            "Do you want to save your changes before closing?"
+        ):
+            self._save()
+        else:
+            self.destroy()
 
     def _on_provider_change(self, *args):
         if self._var_provider.get() == "claude":
