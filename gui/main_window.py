@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from datetime import date
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, ttk
 
 from gui.styles import BaseWindow, COLORS, FONTS, PAD
 
@@ -223,11 +223,27 @@ class MainWindow(BaseWindow):
         )
         self._btn_export.pack(side="left")
 
-        # Status area — plain text, no black box
+        # Status area
+        status_header = tk.Frame(right, bg=COLORS["bg"])
+        status_header.pack(fill="x", pady=(0, 4))
+
         tk.Label(
-            right, text="Status",
+            status_header, text="Status",
             font=FONTS["heading"], fg=COLORS["text"], bg=COLORS["bg"]
-        ).pack(anchor="w", pady=(0, 4))
+        ).pack(side="left")
+
+        self._lbl_timer = tk.Label(
+            status_header, text="",
+            font=FONTS["small"], fg=COLORS["text_muted"], bg=COLORS["bg"]
+        )
+        self._lbl_timer.pack(side="right")
+
+        # Progress bar — hidden until analysis starts
+        self._progress = ttk.Progressbar(
+            right, mode="indeterminate", length=200
+        )
+        self._progress.pack(fill="x", pady=(0, 6))
+        self._progress.pack_forget()
 
         status_frame = tk.Frame(
             right, bg=COLORS["bg_card"],
@@ -364,6 +380,42 @@ class MainWindow(BaseWindow):
         if path:
             self._var_meeting.set(path)
 
+    def _start_progress(self):
+        """Start progress bar and elapsed timer."""
+        import time
+        self._analysis_start = time.time()
+        self._progress.pack(fill="x", pady=(0, 6), before=self._status_text.master)
+        self._progress.start(12)
+        self._tick_timer()
+
+    def _tick_timer(self):
+        """Update elapsed time label every second while analysis runs."""
+        import time
+        if not getattr(self, "_analysis_running", False):
+            return
+        elapsed = int(time.time() - self._analysis_start)
+        mins, secs = divmod(elapsed, 60)
+        self._lbl_timer.configure(
+            text=f"Elapsed: {mins}:{secs:02d}",
+            fg=COLORS["text_muted"]
+        )
+        self.after(1000, self._tick_timer)
+
+    def _stop_progress(self, success: bool = True):
+        """Stop progress bar and timer, show final elapsed time."""
+        import time
+        self._analysis_running = False
+        self._progress.stop()
+        self._progress.pack_forget()
+        if hasattr(self, "_analysis_start"):
+            elapsed = int(time.time() - self._analysis_start)
+            mins, secs = divmod(elapsed, 60)
+            color = COLORS["success"] if success else COLORS["error"]
+            self._lbl_timer.configure(
+                text=f"Finished in {mins}:{secs:02d}",
+                fg=color
+            )
+
     def _run_analysis(self):
         meeting_folder = self._var_meeting.get().strip()
         if not meeting_folder:
@@ -382,7 +434,15 @@ class MainWindow(BaseWindow):
             else:
                 return
 
+        # Clear previous status
+        self._status_text.configure(state="normal")
+        self._status_text.delete("1.0", "end")
+        self._status_text.configure(state="disabled")
+        self._lbl_timer.configure(text="")
+
         self._btn_analyze.configure(state="disabled", text="Analyzing…")
+        self._analysis_running = True
+        self._start_progress()
         self._append_status(f"Starting analysis: {meeting_path.name}")
 
         # Pass manual transcript override if set
@@ -438,16 +498,16 @@ class MainWindow(BaseWindow):
             web_mode = mode in ("web", "two_pass")
             two_pass = mode == "two_pass"
 
-            run_meeting(
-                meeting_folder=meeting_path,
-                web_mode=web_mode,
-                two_pass=two_pass,
-                single_pass=False,
-                max_frames_override=None,
-                manual_transcript=Path(manual_transcript) if manual_transcript else None,
+            result = run_meeting(
+                meeting_folder      = meeting_path,
+                web_mode            = web_mode,
+                two_pass            = two_pass,
+                single_pass         = False,
+                max_frames_override = None,
+                manual_transcript   = Path(manual_transcript) if manual_transcript else None,
             )
 
-            self.after(0, lambda: self._analysis_done(meeting_path, web_mode))
+            self.after(0, lambda: self._analysis_done(result))
 
         except SystemExit:
             self.after(0, lambda: self._analysis_error("Analysis stopped — check the output above."))
@@ -456,31 +516,19 @@ class MainWindow(BaseWindow):
         finally:
             logger.removeHandler(handler)
 
-    def _analysis_done(self, meeting_path: Path, web_mode: bool):
+    def _analysis_done(self, result):
+        self._stop_progress(success=True)
         self._btn_analyze.configure(state="normal", text="▶  Analyze")
         self._append_status("")
-        self._append_status("  Analysis complete!", "ok")
+        self._append_status(f"  Extraction complete — {result.n_frames} frames ready", "ok")
+        self._append_status(f"  Opening next steps…")
 
-        if not web_mode:
-            frames_dir  = meeting_path / "imagenes_reunion"
-            transcript  = next(meeting_path.glob("*.txt"), None)
-            self._append_status("  Files ready for Cowork:", "ok")
-            self._append_status(f"  Folder:     {meeting_path}")
-            if transcript:
-                self._append_status(f"  Transcript: {transcript.name}")
-            self._append_status(f"  Frames:     {frames_dir}")
-            self._append_status("")
-            self._append_status(
-                "  In Cowork, point to this folder and run the analysis.", "ok"
-            )
-        else:
-            self._append_status(
-                "  Upload the files listed above to your AI chat,\n"
-                "  then paste the prompt pack to generate the report.",
-                "ok"
-            )
+        # Show the next steps window
+        from gui.next_steps_window import NextStepsWindow
+        NextStepsWindow(self.master, result=result)
 
     def _analysis_error(self, msg: str):
+        self._stop_progress(success=False)
         self._btn_analyze.configure(state="normal", text="▶  Analyze")
         self._append_status(f"  Error: {msg}", "err")
 
