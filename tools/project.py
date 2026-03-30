@@ -162,8 +162,8 @@ def run_project_new():
 
     # ── Determine prompt pack file path ──
     provider_folder = {"claude": "claude", "chatgpt": "chatgpt", "gemini": "gemini"}.get(provider_choice, "claude")
-    mip_install_dir = Path(__file__).parent.parent
-    prompt_file = mip_install_dir / "prompt_pack" / provider_folder / "project_instructions.md"
+    mip_root = Path(global_config["mip_root"]).expanduser().resolve()
+    prompt_file = mip_root / "prompt_pack" / provider_folder / "project_instructions.md"
 
     # ── Save prompt pack to file ──
     from tools.prompt_generator import generate_prompt_pack as _gen
