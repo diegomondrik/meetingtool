@@ -17,7 +17,9 @@ from gui.styles import BaseWindow, COLORS, FONTS, PAD
 class MainWindow(BaseWindow):
 
     def __init__(self, parent, config: dict):
-        super().__init__(parent, "Home", width=720, height=620)
+        super().__init__(parent, "Home", width=720, height=560)
+        self.resizable(True, True)
+        self.minsize(640, 480)
         self.config = config
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
@@ -53,11 +55,13 @@ class MainWindow(BaseWindow):
 
         # ── Main content: left panel (projects) + right panel (meeting) ──
         content = tk.Frame(self, bg=COLORS["bg"])
-        content.pack(fill="both", expand=True, padx=PAD["window"])
+        content.pack(fill="both", expand=True, padx=PAD["window"], pady=(0, PAD["window"]))
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(0, weight=1)
 
         # Left: project list
         left = tk.Frame(content, bg=COLORS["bg"])
-        left.pack(side="left", fill="y", padx=(0, 16))
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
 
         tk.Label(
             left, text="Your projects",
@@ -79,7 +83,7 @@ class MainWindow(BaseWindow):
             relief="flat",
             highlightthickness=1,
             highlightbackground=COLORS["border"],
-            width=28, height=14,
+            width=28,
             yscrollcommand=scrollbar.set,
             cursor="hand2"
         )
@@ -87,9 +91,9 @@ class MainWindow(BaseWindow):
         scrollbar.config(command=self._project_list.yview)
         self._project_list.bind("<<ListboxSelect>>", self._on_project_select)
 
-        # Right: meeting selection + analyze
+        # Right: meeting selection + analyze + status
         right = tk.Frame(content, bg=COLORS["bg"])
-        right.pack(side="left", fill="both", expand=True)
+        right.grid(row=0, column=1, sticky="nsew")
 
         tk.Label(
             right, text="Meeting to analyze",
@@ -126,14 +130,16 @@ class MainWindow(BaseWindow):
         mode_frame.pack(fill="x", pady=(0, 8))
 
         cowork_mode = self.config.get("cowork_mode", False)
-        provider = self.config.get("llm_provider", "claude")
+        provider    = self.config.get("llm_provider", "claude")
 
         if provider == "claude" and cowork_mode:
             modes = [("cowork", "Cowork (automatic)"), ("web", "Web browser")]
             default_mode = "cowork"
         else:
-            modes = [("web", "Web browser — standard (< 45 min)"),
-                     ("two_pass", "Web browser — two-pass (45+ min)")]
+            modes = [
+                ("web",      "Web browser — standard  (meetings under 45 min)"),
+                ("two_pass", "Web browser — two-pass  (meetings 45 min or longer)"),
+            ]
             default_mode = "web"
 
         tk.Label(
@@ -154,17 +160,37 @@ class MainWindow(BaseWindow):
 
         # Analyze button
         self._btn_analyze = self._primary_button(
-            right, "▶  Analyze Meeting", self._run_analysis, width=20
+            right, "▶  Analyze Meeting", self._run_analysis, width=22
         )
-        self._btn_analyze.pack(anchor="w", pady=(4, 12))
+        self._btn_analyze.pack(anchor="w", pady=(8, 12))
 
-        # Log box
+        # Status area — plain text, no black box
         tk.Label(
-            right, text="Output",
+            right, text="Status",
             font=FONTS["heading"], fg=COLORS["text"], bg=COLORS["bg"]
         ).pack(anchor="w", pady=(0, 4))
 
-        self._log = self._log_box(right, height=9)
+        status_frame = tk.Frame(
+            right, bg=COLORS["bg_card"],
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+        )
+        status_frame.pack(fill="both", expand=True)
+
+        self._status_text = tk.Text(
+            status_frame,
+            font=FONTS["body"],
+            bg=COLORS["bg_card"], fg=COLORS["text"],
+            relief="flat",
+            state="disabled",
+            wrap="word",
+            padx=10, pady=8,
+            cursor="arrow",
+        )
+        status_scroll = tk.Scrollbar(status_frame, command=self._status_text.yview)
+        self._status_text.configure(yscrollcommand=status_scroll.set)
+        status_scroll.pack(side="right", fill="y")
+        self._status_text.pack(fill="both", expand=True)
 
     def _load_projects(self):
         """Populate the project list from the projects folder."""
@@ -238,7 +264,7 @@ class MainWindow(BaseWindow):
                 return
 
         self._btn_analyze.configure(state="disabled", text="Analyzing…")
-        self._log_append(self._log, f"Starting analysis: {meeting_path.name}")
+        self._append_status(f"Starting analysis: {meeting_path.name}")
 
         mode = self._var_mode.get()
         thread = threading.Thread(
@@ -248,10 +274,27 @@ class MainWindow(BaseWindow):
         )
         thread.start()
 
+    def _append_status(self, msg: str, color: str = None):
+        """Append a line to the status text area."""
+        self._status_text.configure(state="normal")
+        colors_map = {
+            "ok":   COLORS["success"],
+            "warn": COLORS["warning"],
+            "err":  COLORS["error"],
+        }
+        if color and color in colors_map:
+            tag = f"tag_{color}"
+            self._status_text.tag_configure(tag, foreground=colors_map[color])
+            self._status_text.insert("end", msg + "\n", tag)
+        else:
+            self._status_text.insert("end", msg + "\n")
+        self._status_text.see("end")
+        self._status_text.configure(state="disabled")
+        self._status_text.update()
+
     def _do_analysis(self, meeting_path: Path, mode: str):
         import logging
 
-        # Redirect logging to the GUI log box
         class GUIHandler(logging.Handler):
             def __init__(self, window):
                 super().__init__()
@@ -259,7 +302,7 @@ class MainWindow(BaseWindow):
             def emit(self, record):
                 msg = self.format(record)
                 color = "ok" if record.levelno == logging.INFO else "warn"
-                self.window._log_append(self.window._log, msg, color)
+                self.window.after(0, lambda m=msg, c=color: self.window._append_status(m, c))
 
         logger = logging.getLogger()
         handler = GUIHandler(self)
@@ -292,18 +335,15 @@ class MainWindow(BaseWindow):
 
     def _analysis_done(self, meeting_path: Path, web_mode: bool):
         self._btn_analyze.configure(state="normal", text="▶  Analyze Meeting")
-        self._log_append(self._log, "", None)
-        self._log_append(self._log, "  ✓  Analysis complete!", "ok")
+        self._append_status("")
+        self._append_status("  Analysis complete!", "ok")
 
         if not web_mode:
-            self._log_append(
-                self._log,
-                f"  Cowork can now read the files in:\n  {meeting_path}",
-                "ok"
+            self._append_status(
+                f"  Cowork can now read the files in:\n  {meeting_path}", "ok"
             )
         else:
-            self._log_append(
-                self._log,
+            self._append_status(
                 "  Upload the files listed above to your AI chat,\n"
                 "  then paste the prompt pack to generate the report.",
                 "ok"
@@ -311,7 +351,7 @@ class MainWindow(BaseWindow):
 
     def _analysis_error(self, msg: str):
         self._btn_analyze.configure(state="normal", text="▶  Analyze Meeting")
-        self._log_append(self._log, f"  ✗  Error: {msg}", "err")
+        self._append_status(f"  Error: {msg}", "err")
 
     def _new_project(self):
         from gui.project_window import ProjectWindow

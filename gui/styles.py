@@ -59,7 +59,7 @@ class BaseWindow(tk.Toplevel):
         super().__init__(parent)
         self.title(f"MeetingTool — {title}")
         self.configure(bg=COLORS["bg"])
-        self.resizable(False, False)
+        self.resizable(True, True)
         self._center(width, height)
         self.lift()
         self.focus_force()
