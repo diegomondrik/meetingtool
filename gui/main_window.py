@@ -17,7 +17,7 @@ from gui.styles import BaseWindow, COLORS, FONTS, PAD
 class MainWindow(BaseWindow):
 
     def __init__(self, parent, config: dict):
-        super().__init__(parent, "Home", width=720, height=580)
+        super().__init__(parent, "Home", width=720, height=620)
         self.config = config
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
@@ -139,7 +139,7 @@ class MainWindow(BaseWindow):
         tk.Label(
             mode_frame, text="Workflow:",
             font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"]
-        ).pack(side="left", padx=(0, 8))
+        ).pack(anchor="w", pady=(0, 4))
 
         self._var_mode = tk.StringVar(value=default_mode)
         for value, label in modes:
@@ -150,7 +150,7 @@ class MainWindow(BaseWindow):
                 activebackground=COLORS["bg"],
                 selectcolor=COLORS["accent_light"],
                 relief="flat", cursor="hand2",
-            ).pack(side="left", padx=(0, 12))
+            ).pack(anchor="w", pady=2)
 
         # Analyze button
         self._btn_analyze = self._primary_button(
@@ -336,7 +336,7 @@ class SettingsWindow(BaseWindow):
     """Simple settings window to update global config."""
 
     def __init__(self, parent, config: dict, on_save=None):
-        super().__init__(parent, "Settings", width=540, height=420)
+        super().__init__(parent, "Settings", width=540, height=480)
         self.config = config
         self.on_save = on_save
         self.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -345,8 +345,18 @@ class SettingsWindow(BaseWindow):
     def _build(self):
         self._header(self, "Settings", "Update your MeetingTool preferences.")
 
-        content = tk.Frame(self, bg=COLORS["bg_card"])
-        content.pack(fill="both", expand=True)
+        # Scrollable content
+        canvas = tk.Canvas(self, bg=COLORS["bg_card"], highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        content = tk.Frame(canvas, bg=COLORS["bg_card"])
+        content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
         self._section_label(content, "Installation folder")
         self._var_root = self._labeled_field(
