@@ -1,0 +1,40 @@
+# MeetingTool v2 — .gitignore
+
+# Credentials
+.env
+*.env
+
+# Meeting data — never commit client recordings or reports
+projects/
+*.mp4
+*.MP4
+*.docx
+*.txt
+imagenes_reunion/
+report_*.md
+report_*.docx
+handoff_*.json
+transcript_half*.txt
+
+# MeetingTool config (machine-specific)
+mip.config.json
+
+# Test fixtures (generated on setup)
+tools/test_meeting.mp4
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
