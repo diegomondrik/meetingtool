@@ -1,5 +1,5 @@
 """
-tools/setup.py — MeetingTool v2.0
+tools/installer.py — MeetingTool v2.0
 ==================================
 Interactive first-time setup. Verifies environment, installs dependencies,
 creates folder structure, generates global mip.config.json.
@@ -327,6 +327,18 @@ def run_setup():
         default_key="1"
     )
 
+    # If Claude, ask whether they use Cowork or web browser
+    cowork_mode = False
+    if provider == "claude":
+        cowork_mode = _ask_choice(
+            "How do you use Claude?",
+            {
+                "1": "Claude Desktop with Cowork",
+                "2": "Web browser (claude.ai)",
+            },
+            default_key="1"
+        ) == "Claude Desktop with Cowork"
+
     language = _ask_choice(
         "Default report language:",
         {"1": "english", "2": "spanish"},
@@ -354,6 +366,7 @@ def run_setup():
         "mip_version": "2.0",
         "mip_root": str(mip_root),
         "llm_provider": provider,
+        "cowork_mode": cowork_mode,
         "default_language": language,
         "installed_at": datetime.now().strftime("%Y-%m-%d"),
     }

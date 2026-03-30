@@ -48,7 +48,7 @@ def cli():
 @cli.command()
 def setup():
     """First-time setup. Run once per machine."""
-    from tools.setup import run_setup
+    from tools.installer import run_setup
     run_setup()
 
 

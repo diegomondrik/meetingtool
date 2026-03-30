@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, date
 
-from tools.setup import _ok, _warn, _err, _load_global_config
+from tools.installer import _ok, _warn, _err, _load_global_config
 from tools.extract_frames import (
     extract_frames,
     parse_transcript_docx,
