@@ -105,6 +105,7 @@ class MainWindow(BaseWindow):
         folder_frame.pack(fill="x", pady=(0, 8))
 
         self._var_meeting = tk.StringVar()
+        self._var_meeting.trace_add("write", self._on_folder_change)
         meeting_entry = tk.Entry(
             folder_frame, textvariable=self._var_meeting,
             font=FONTS["body"],
@@ -124,6 +125,51 @@ class MainWindow(BaseWindow):
             padx=8, pady=4,
             command=self._browse_meeting
         ).pack(side="left")
+
+        # ── File detection panel ──
+        self._detect_frame = tk.Frame(right, bg=COLORS["bg"])
+        self._detect_frame.pack(fill="x", pady=(0, 6))
+
+        # Video detection label
+        self._lbl_video = tk.Label(
+            self._detect_frame, text="",
+            font=FONTS["small"], fg=COLORS["text_muted"],
+            bg=COLORS["bg"], anchor="w"
+        )
+        self._lbl_video.pack(anchor="w")
+
+        # Transcript detection label + optional manual picker
+        self._lbl_transcript = tk.Label(
+            self._detect_frame, text="",
+            font=FONTS["small"], fg=COLORS["text_muted"],
+            bg=COLORS["bg"], anchor="w"
+        )
+        self._lbl_transcript.pack(anchor="w")
+
+        # Manual transcript picker — shown only when auto-detect fails
+        self._transcript_manual_frame = tk.Frame(self._detect_frame, bg=COLORS["bg"])
+        self._var_transcript = tk.StringVar()
+        transcript_entry = tk.Entry(
+            self._transcript_manual_frame,
+            textvariable=self._var_transcript,
+            font=FONTS["small"],
+            bg=COLORS["bg_input"], fg=COLORS["text"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLORS["warning"],
+            highlightcolor=COLORS["accent"],
+        )
+        transcript_entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 4))
+        tk.Button(
+            self._transcript_manual_frame, text="Browse…",
+            font=FONTS["small"],
+            bg=COLORS["border"], fg=COLORS["text"],
+            relief="flat", cursor="hand2",
+            padx=6, pady=3,
+            command=self._browse_transcript
+        ).pack(side="left")
+        # Hidden by default — shown only when transcript not found
+        self._transcript_manual_frame.pack_forget()
 
         # Mode selector
         mode_frame = tk.Frame(right, bg=COLORS["bg"])
@@ -249,6 +295,66 @@ class MainWindow(BaseWindow):
         project_folder = Path(project_cfg.get("project_folder", ""))
         self._var_meeting.set(str(project_folder / f"MeetingName_{date.today().strftime('%Y%m%d')}"))
 
+    def _on_folder_change(self, *args):
+        """Detect video and transcript when folder path changes."""
+        folder_str = self._var_meeting.get().strip()
+        if not folder_str:
+            self._lbl_video.configure(text="")
+            self._lbl_transcript.configure(text="")
+            self._transcript_manual_frame.pack_forget()
+            return
+
+        folder = Path(folder_str)
+        if not folder.exists():
+            self._lbl_video.configure(text="")
+            self._lbl_transcript.configure(text="")
+            self._transcript_manual_frame.pack_forget()
+            return
+
+        from tools.extract_frames import find_video_and_transcript
+        video, transcript = find_video_and_transcript(folder)
+
+        if video:
+            self._lbl_video.configure(
+                text=f"  ✓  Video: {video.name}",
+                fg=COLORS["success"]
+            )
+        else:
+            self._lbl_video.configure(
+                text="  ✗  No .mp4 found in this folder",
+                fg=COLORS["error"]
+            )
+
+        if transcript:
+            self._lbl_transcript.configure(
+                text=f"  ✓  Transcript: {transcript.name}",
+                fg=COLORS["success"]
+            )
+            self._transcript_manual_frame.pack_forget()
+            self._var_transcript.set("")
+        else:
+            self._lbl_transcript.configure(
+                text="  ⚠  Transcript not found automatically — select it manually:",
+                fg=COLORS["warning"]
+            )
+            self._transcript_manual_frame.pack(fill="x", pady=(4, 0))
+
+    def _browse_transcript(self):
+        """Browse for a transcript DOCX file manually."""
+        folder_str = self._var_meeting.get().strip()
+        initial = folder_str if folder_str else str(Path.home())
+        path = filedialog.askopenfilename(
+            title="Select transcript file",
+            initialdir=initial,
+            filetypes=[("Word documents", "*.docx"), ("All files", "*.*")]
+        )
+        if path:
+            self._var_transcript.set(path)
+            self._lbl_transcript.configure(
+                text=f"  ✓  Transcript: {Path(path).name}  (manual)",
+                fg=COLORS["success"]
+            )
+
     def _browse_meeting(self):
         mip_root = self.config.get("mip_root", str(Path.home()))
         path = filedialog.askdirectory(
@@ -279,10 +385,13 @@ class MainWindow(BaseWindow):
         self._btn_analyze.configure(state="disabled", text="Analyzing…")
         self._append_status(f"Starting analysis: {meeting_path.name}")
 
+        # Pass manual transcript override if set
+        manual_transcript = self._var_transcript.get().strip() or None
+
         mode = self._var_mode.get()
         thread = threading.Thread(
             target=self._do_analysis,
-            args=(meeting_path, mode),
+            args=(meeting_path, mode, manual_transcript),
             daemon=True
         )
         thread.start()
@@ -305,7 +414,7 @@ class MainWindow(BaseWindow):
         self._status_text.configure(state="disabled")
         self._status_text.update()
 
-    def _do_analysis(self, meeting_path: Path, mode: str):
+    def _do_analysis(self, meeting_path: Path, mode: str, manual_transcript: str = None):
         import logging
 
         class GUIHandler(logging.Handler):
@@ -335,6 +444,7 @@ class MainWindow(BaseWindow):
                 two_pass=two_pass,
                 single_pass=False,
                 max_frames_override=None,
+                manual_transcript=Path(manual_transcript) if manual_transcript else None,
             )
 
             self.after(0, lambda: self._analysis_done(meeting_path, web_mode))

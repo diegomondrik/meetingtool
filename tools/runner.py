@@ -348,6 +348,7 @@ def run_meeting(
     two_pass: bool,
     single_pass: bool,
     max_frames_override: int | None,
+    manual_transcript: Path | None = None,
 ):
     logging.basicConfig(
         level=logging.INFO,
@@ -373,6 +374,11 @@ def run_meeting(
 
     # Find video and transcript
     video_path, transcript_path = find_video_and_transcript(meeting_folder)
+
+    # Override transcript if provided manually from GUI
+    if manual_transcript and manual_transcript.exists():
+        transcript_path = manual_transcript
+        log.info(f"Using manually selected transcript: {transcript_path.name}")
 
     if video_path is None:
         _err("No MP4 file found in this folder.")
