@@ -209,17 +209,22 @@ class MainWindow(BaseWindow):
         btn_row.pack(fill="x", pady=(8, 12))
 
         self._btn_analyze = self._primary_button(
-            btn_row, "▶  Analyze", self._run_analysis, width=14
+            btn_row, "▶  Analyze", self._run_analysis, width=12
         )
         self._btn_analyze.pack(side="left", padx=(0, 8))
 
+        self._btn_next_steps = self._secondary_button(
+            btn_row, "Next Steps →", self._open_next_steps, width=12
+        )
+        self._btn_next_steps.pack(side="left", padx=(0, 8))
+
         self._btn_open_report = self._secondary_button(
-            btn_row, "Open report.md", self._open_report, width=14
+            btn_row, "Open report.md", self._open_report, width=13
         )
         self._btn_open_report.pack(side="left", padx=(0, 8))
 
         self._btn_export = self._secondary_button(
-            btn_row, "Export to DOCX", self._export_docx, width=14
+            btn_row, "Export to DOCX", self._export_docx, width=13
         )
         self._btn_export.pack(side="left")
 
@@ -531,6 +536,101 @@ class MainWindow(BaseWindow):
         self._stop_progress(success=False)
         self._btn_analyze.configure(state="normal", text="▶  Analyze")
         self._append_status(f"  Error: {msg}", "err")
+
+    def _open_next_steps(self):
+        """Open NextStepsWindow — auto for Cowork, ask user confirmation for web."""
+        meeting_folder = self._var_meeting.get().strip()
+        if not meeting_folder:
+            messagebox.showwarning("No folder", "Please select a meeting folder first.")
+            return
+
+        meeting_path    = Path(meeting_folder)
+        frames_dir      = meeting_path / "imagenes_reunion"
+        existing_frames = sorted(frames_dir.glob("frame_*.jpg")) if frames_dir.exists() else []
+
+        # Determine current workflow
+        from tools.runner import _merged_config
+        config      = _merged_config(meeting_path)
+        cowork_mode = config.get("cowork_mode", False)
+        provider    = config.get("llm_provider", "claude")
+        is_cowork   = (provider == "claude" and cowork_mode)
+
+        if not existing_frames:
+            # No frames anywhere — offer to run analysis
+            answer = messagebox.askyesno(
+                "No frames found",
+                f"No extracted frames found in:\n{frames_dir}\n\n"
+                "Run Analyze first to extract frames from the recording?\n\n"
+                "Click Yes to run Analyze now, or No to cancel."
+            )
+            if answer:
+                self._run_analysis()
+            return
+
+        if is_cowork:
+            # Cowork — verify automatically, no need to ask
+            self._append_status(
+                f"  Found {len(existing_frames)} existing frames — opening next steps…"
+            )
+            self._build_result_from_existing(meeting_path, existing_frames)
+        else:
+            # Web — frames exist but user must confirm they are the right ones
+            answer = messagebox.askyesno(
+                "Use existing frames?",
+                f"Found {len(existing_frames)} frames already extracted in:\n"
+                f"{frames_dir}\n\n"
+                f"Do you want to use these frames for the next steps?\n\n"
+                f"Click Yes to continue, or No to run Analyze again."
+            )
+            if answer:
+                self._append_status(
+                    f"  Using {len(existing_frames)} existing frames — opening next steps…"
+                )
+                self._build_result_from_existing(meeting_path, existing_frames)
+            else:
+                self._run_analysis()
+
+    def _build_result_from_existing(self, meeting_path: Path, existing_frames: list):
+        """Build an AnalysisResult from already-extracted files and open NextStepsWindow."""
+        from tools.runner import AnalysisResult, _merged_config
+        from tools.extract_frames import find_video_and_transcript
+
+        config      = _merged_config(meeting_path)
+        provider    = config.get("llm_provider", "claude")
+        cowork_mode = config.get("cowork_mode", False)
+        report_lang = config.get("report_language", "english")
+
+        # Find transcript .txt if it exists
+        txt_files = list(meeting_path.glob("*.txt"))
+        transcript_txt = txt_files[0] if txt_files else None
+
+        # Generate prompt
+        from tools.prompt_generator import generate_meeting_prompt
+        prompt = generate_meeting_prompt(config, report_lang)
+
+        # Determine workflow from config
+        if provider == "claude" and cowork_mode:
+            workflow = "cowork"
+            frames_chat1 = existing_frames
+        else:
+            workflow = "web"
+            frames_chat1 = existing_frames
+
+        result = AnalysisResult(
+            workflow       = workflow,
+            meeting_folder = meeting_path,
+            frames_dir     = meeting_path / "imagenes_reunion",
+            n_frames       = len(existing_frames),
+            transcript_txt = transcript_txt,
+            report_language= report_lang,
+            prompt_chat1   = prompt,
+            frames_chat1   = frames_chat1,
+            provider       = provider,
+            cowork_mode    = cowork_mode,
+        )
+
+        from gui.next_steps_window import NextStepsWindow
+        NextStepsWindow(self.master, result=result)
 
     def _open_report(self):
         """Open the most recent report.md in the system text editor."""
