@@ -84,18 +84,17 @@ class NextStepsWindow(BaseWindow):
 
     def _build_cowork(self):
         r = self.result
-        provider_name = PROVIDER_NAMES.get(r.provider, "Claude")
 
         self._header(
             self,
-            "Files ready — open Cowork to generate the report",
+            "Files ready — follow these steps in Cowork",
             f"{r.n_frames} frames extracted  ·  transcript parsed  ·  prompt ready"
         )
 
         content = tk.Frame(self, bg=COLORS["bg_card"])
         content.pack(fill="both", expand=True)
 
-        # ── Step 1: What was prepared ──
+        # ── What was prepared ──
         self._section_label(content, "What MeetingTool prepared")
 
         info = tk.Frame(content, bg=COLORS["bg_card"], padx=PAD["window"], pady=8)
@@ -108,84 +107,98 @@ class NextStepsWindow(BaseWindow):
         for filename, desc in items:
             row = tk.Frame(info, bg=COLORS["bg_card"])
             row.pack(fill="x", pady=2)
-            tk.Label(
-                row, text="  ✓",
-                font=FONTS["body"], fg=COLORS["success"], bg=COLORS["bg_card"]
-            ).pack(side="left")
-            tk.Label(
-                row, text=f"  {filename}",
-                font=FONTS["mono"], fg=COLORS["accent"], bg=COLORS["bg_card"]
-            ).pack(side="left")
-            tk.Label(
-                row, text=f"  — {desc}",
-                font=FONTS["small"], fg=COLORS["text_muted"], bg=COLORS["bg_card"]
-            ).pack(side="left")
+            tk.Label(row, text="  ✓", font=FONTS["body"],
+                     fg=COLORS["success"], bg=COLORS["bg_card"]).pack(side="left")
+            tk.Label(row, text=f"  {filename}", font=FONTS["mono"],
+                     fg=COLORS["accent"], bg=COLORS["bg_card"]).pack(side="left")
+            tk.Label(row, text=f"  — {desc}", font=FONTS["small"],
+                     fg=COLORS["text_muted"], bg=COLORS["bg_card"]).pack(side="left")
 
-        # ── Step 2: Copy prompt ──
-        self._section_label(content, "Step 1 — Copy the analysis prompt")
+        # ── Step 1 ──
+        self._section_label(content, "Step 1 — Open Claude Desktop and go to the Cowork tab")
 
         step1 = tk.Frame(content, bg=COLORS["bg_card"], padx=PAD["window"], pady=8)
         step1.pack(fill="x")
 
-        tk.Label(
-            step1,
-            text="Copy the prompt to your clipboard, then paste it in Cowork to start the analysis.",
-            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg_card"],
-            justify="left", anchor="w"
-        ).pack(anchor="w", pady=(0, 8))
+        self._secondary_button(
+            step1, "Open Claude Desktop", _open_claude_desktop, width=20
+        ).pack(anchor="w")
 
-        self._copy_btn = self._primary_button(
-            step1, "Copy prompt to clipboard", self._copy_cowork_prompt, width=24
-        )
-        self._copy_btn.pack(anchor="w")
-
-        self._lbl_copied = tk.Label(
-            step1, text="",
-            font=FONTS["small"], fg=COLORS["success"], bg=COLORS["bg_card"]
-        )
-        self._lbl_copied.pack(anchor="w", pady=(4, 0))
-
-        # ── Step 3: Open Cowork ──
-        self._section_label(content, "Step 2 — Open Cowork and paste")
+        # ── Step 2 ──
+        self._section_label(content, "Step 2 — Point Cowork to the meeting folder")
 
         step2 = tk.Frame(content, bg=COLORS["bg_card"], padx=PAD["window"], pady=8)
         step2.pack(fill="x")
 
-        folder_frame = tk.Frame(step2, bg=COLORS["accent_light"], padx=10, pady=8)
-        folder_frame.pack(fill="x", pady=(0, 8))
-
         tk.Label(
-            folder_frame,
-            text="Point Cowork to this folder:",
-            font=FONTS["small"], fg=COLORS["text_muted"], bg=COLORS["accent_light"]
-        ).pack(anchor="w")
+            step2,
+            text='Click the folder selector below the Cowork chat input\n'
+                 '(the button that says "Work in a project" or shows a folder icon).\n'
+                 'Navigate to and select this folder:',
+            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg_card"],
+            justify="left"
+        ).pack(anchor="w", pady=(0, 6))
+
+        folder_frame = tk.Frame(step2, bg=COLORS["accent_light"], padx=10, pady=8)
+        folder_frame.pack(fill="x")
+
         tk.Label(
             folder_frame,
             text=str(r.meeting_folder),
             font=FONTS["mono"], fg=COLORS["accent"], bg=COLORS["accent_light"]
-        ).pack(anchor="w")
+        ).pack(side="left", fill="x", expand=True)
 
-        btn_row = tk.Frame(step2, bg=COLORS["bg_card"])
-        btn_row.pack(anchor="w")
+        tk.Button(
+            folder_frame, text="Copy path",
+            font=FONTS["small"],
+            bg=COLORS["accent"], fg="#FFFFFF",
+            relief="flat", cursor="hand2",
+            padx=8, pady=2,
+            command=lambda: _copy_to_clipboard(self, str(r.meeting_folder))
+        ).pack(side="right", padx=(8, 0))
 
         self._secondary_button(
-            btn_row, "Open Claude Desktop", _open_claude_desktop, width=20
-        ).pack(side="left", padx=(0, 8))
+            step2, "Open meeting folder", self._open_folder, width=18
+        ).pack(anchor="w", pady=(8, 0))
 
-        self._secondary_button(
-            btn_row, "Open meeting folder", self._open_folder, width=18
-        ).pack(side="left")
-
-        # ── Step 4: After Cowork ──
-        self._section_label(content, "Step 3 — After Cowork generates the report")
+        # ── Step 3 ──
+        self._section_label(content, "Step 3 — Paste the prompt in the Cowork chat and send")
 
         step3 = tk.Frame(content, bg=COLORS["bg_card"], padx=PAD["window"], pady=8)
         step3.pack(fill="x")
 
         tk.Label(
             step3,
-            text="Come back here and use:\n"
-                 "  Open report.md  — to read and review the generated report\n"
+            text="Start a new Cowork chat (or use an existing one).\n"
+                 "Click below to copy the analysis prompt, then paste it\n"
+                 "into the Cowork chat input and press Enter.",
+            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg_card"],
+            justify="left"
+        ).pack(anchor="w", pady=(0, 8))
+
+        self._copy_btn = self._primary_button(
+            step3, "Copy prompt to clipboard", self._copy_cowork_prompt, width=24
+        )
+        self._copy_btn.pack(anchor="w")
+
+        self._lbl_copied = tk.Label(
+            step3, text="",
+            font=FONTS["small"], fg=COLORS["success"], bg=COLORS["bg_card"]
+        )
+        self._lbl_copied.pack(anchor="w", pady=(4, 0))
+
+        # ── Step 4 ──
+        self._section_label(content, "Step 4 — After Cowork generates the report")
+
+        step4 = tk.Frame(content, bg=COLORS["bg_card"], padx=PAD["window"], pady=8)
+        step4.pack(fill="x")
+
+        tk.Label(
+            step4,
+            text="Cowork will read the frames and transcript from the folder\n"
+                 "and generate report.md automatically.\n\n"
+                 "Come back to MeetingTool and use:\n"
+                 "  Open report.md  — to read and review the report\n"
                  "  Export to DOCX  — when ready for client delivery",
             font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg_card"],
             justify="left"
