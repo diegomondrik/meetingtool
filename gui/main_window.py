@@ -158,11 +158,24 @@ class MainWindow(BaseWindow):
                 relief="flat", cursor="hand2",
             ).pack(anchor="w", pady=2)
 
-        # Analyze button
+        # Action buttons row
+        btn_row = tk.Frame(right, bg=COLORS["bg"])
+        btn_row.pack(fill="x", pady=(8, 12))
+
         self._btn_analyze = self._primary_button(
-            right, "▶  Analyze Meeting", self._run_analysis, width=22
+            btn_row, "▶  Analyze", self._run_analysis, width=14
         )
-        self._btn_analyze.pack(anchor="w", pady=(8, 12))
+        self._btn_analyze.pack(side="left", padx=(0, 8))
+
+        self._btn_open_report = self._secondary_button(
+            btn_row, "Open report.md", self._open_report, width=14
+        )
+        self._btn_open_report.pack(side="left", padx=(0, 8))
+
+        self._btn_export = self._secondary_button(
+            btn_row, "Export to DOCX", self._export_docx, width=14
+        )
+        self._btn_export.pack(side="left")
 
         # Status area — plain text, no black box
         tk.Label(
@@ -334,13 +347,21 @@ class MainWindow(BaseWindow):
             logger.removeHandler(handler)
 
     def _analysis_done(self, meeting_path: Path, web_mode: bool):
-        self._btn_analyze.configure(state="normal", text="▶  Analyze Meeting")
+        self._btn_analyze.configure(state="normal", text="▶  Analyze")
         self._append_status("")
         self._append_status("  Analysis complete!", "ok")
 
         if not web_mode:
+            frames_dir  = meeting_path / "imagenes_reunion"
+            transcript  = next(meeting_path.glob("*.txt"), None)
+            self._append_status("  Files ready for Cowork:", "ok")
+            self._append_status(f"  Folder:     {meeting_path}")
+            if transcript:
+                self._append_status(f"  Transcript: {transcript.name}")
+            self._append_status(f"  Frames:     {frames_dir}")
+            self._append_status("")
             self._append_status(
-                f"  Cowork can now read the files in:\n  {meeting_path}", "ok"
+                "  In Cowork, point to this folder and run the analysis.", "ok"
             )
         else:
             self._append_status(
@@ -350,8 +371,115 @@ class MainWindow(BaseWindow):
             )
 
     def _analysis_error(self, msg: str):
-        self._btn_analyze.configure(state="normal", text="▶  Analyze Meeting")
+        self._btn_analyze.configure(state="normal", text="▶  Analyze")
         self._append_status(f"  Error: {msg}", "err")
+
+    def _open_report(self):
+        """Open the most recent report.md in the system text editor."""
+        import subprocess, platform
+        meeting_folder = self._var_meeting.get().strip()
+        if not meeting_folder:
+            messagebox.showwarning("No folder", "Please select a meeting folder first.")
+            return
+
+        meeting_path = Path(meeting_folder)
+        reports = sorted(meeting_path.glob("report_*.md"), reverse=True)
+        if not reports:
+            messagebox.showinfo(
+                "No report found",
+                f"No report_*.md found in:\n{meeting_path}\n\n"
+                "Run Analyze first to generate the report."
+            )
+            return
+
+        report = reports[0]
+        system = platform.system()
+        try:
+            if system == "Windows":
+                subprocess.Popen(["notepad.exe", str(report)])
+            elif system == "Darwin":
+                subprocess.Popen(["open", "-t", str(report)])
+            else:
+                subprocess.Popen(["xdg-open", str(report)])
+            self._append_status(f"  Opened: {report.name}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open file:\n{e}")
+
+    def _export_docx(self):
+        """Export the most recent report.md to DOCX with embedded images."""
+        meeting_folder = self._var_meeting.get().strip()
+        if not meeting_folder:
+            messagebox.showwarning("No folder", "Please select a meeting folder first.")
+            return
+
+        meeting_path = Path(meeting_folder)
+        reports = sorted(meeting_path.glob("report_*.md"), reverse=True)
+        if not reports:
+            messagebox.showinfo(
+                "No report found",
+                f"No report_*.md found in:\n{meeting_path}\n\n"
+                "Run Analyze first to generate the report."
+            )
+            return
+
+        report = reports[0]
+
+        # Count image refs to inform the user
+        import re
+        text = report.read_text(encoding="utf-8")
+        refs  = re.findall(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]', text)
+        n_refs = len(refs)
+
+        # Ask format
+        msg = f"Report: {report.name}\n"
+        if n_refs > 3:
+            msg += f"Contains {n_refs} image references — DOCX recommended.\n\n"
+        else:
+            msg += "\n"
+        msg += "Export format:"
+
+        choice = ExportFormatDialog(self, msg).result
+        if choice is None:
+            return  # cancelled
+
+        # Run export in background thread
+        self._append_status(f"  Exporting {report.name} → {choice.upper()}…")
+        thread = threading.Thread(
+            target=self._do_export,
+            args=(meeting_path, choice),
+            daemon=True
+        )
+        thread.start()
+
+    def _do_export(self, meeting_path: Path, output_format: str):
+        try:
+            from tools.exporter import run_export
+            run_export(meeting_folder=meeting_path, output_format=output_format)
+
+            from datetime import date
+            docx_path = meeting_path / f"report_{date.today().strftime('%Y%m%d')}.docx"
+            self.after(0, lambda: self._export_done(docx_path, output_format))
+        except Exception as e:
+            self.after(0, lambda: self._append_status(f"  Export error: {e}", "err"))
+
+    def _export_done(self, docx_path: Path, output_format: str):
+        self._append_status("  Export complete!", "ok")
+        if output_format in ("docx", "both"):
+            self._append_status(f"  DOCX saved: {docx_path}")
+            import platform, subprocess
+            open_folder = messagebox.askyesno(
+                "Export complete",
+                f"DOCX saved:\n{docx_path}\n\nOpen the folder?"
+            )
+            if open_folder:
+                folder = docx_path.parent
+                system = platform.system()
+                if system == "Windows":
+                    subprocess.Popen(f'explorer /select,"{docx_path}"')
+                elif system == "Darwin":
+                    subprocess.Popen(["open", "-R", str(docx_path)])
+                else:
+                    subprocess.Popen(["xdg-open", str(folder)])
 
     def _new_project(self):
         from gui.project_window import ProjectWindow
@@ -370,6 +498,63 @@ class MainWindow(BaseWindow):
 
     def _on_close(self):
         self.master.destroy()
+
+
+class ExportFormatDialog(tk.Toplevel):
+    """Simple dialog asking the user to choose export format."""
+
+    def __init__(self, parent, message: str):
+        super().__init__(parent)
+        self.title("MeetingTool — Export format")
+        self.configure(bg=COLORS["bg"])
+        self.resizable(False, False)
+        self.result = None
+        self.grab_set()
+
+        # Center
+        self.update_idletasks()
+        w, h = 380, 220
+        x = (self.winfo_screenwidth()  - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        tk.Label(
+            self, text=message,
+            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"],
+            justify="left", wraplength=340, padx=20, pady=16
+        ).pack(anchor="w")
+
+        btn_frame = tk.Frame(self, bg=COLORS["bg"], padx=20, pady=8)
+        btn_frame.pack(fill="x")
+
+        for label, value in [
+            ("DOCX  (recommended)", "docx"),
+            ("Markdown only",       "md"),
+            ("Both",                "both"),
+        ]:
+            tk.Button(
+                btn_frame, text=label,
+                font=FONTS["body"],
+                bg=COLORS["bg_card"], fg=COLORS["text"],
+                relief="flat", cursor="hand2",
+                highlightthickness=1,
+                highlightbackground=COLORS["border"],
+                padx=12, pady=6, anchor="w",
+                command=lambda v=value: self._choose(v)
+            ).pack(fill="x", pady=2)
+
+        tk.Button(
+            btn_frame, text="Cancel",
+            font=FONTS["small"], fg=COLORS["text_muted"],
+            bg=COLORS["bg"], relief="flat", cursor="hand2",
+            command=self.destroy
+        ).pack(pady=(8, 0))
+
+        self.wait_window()
+
+    def _choose(self, value: str):
+        self.result = value
+        self.destroy()
 
 
 class SettingsWindow(BaseWindow):
@@ -411,6 +596,34 @@ class SettingsWindow(BaseWindow):
             [("claude", "Claude"), ("chatgpt", "ChatGPT"), ("gemini", "Gemini")],
             default=self.config.get("llm_provider", "claude")
         )
+        self._var_provider.trace_add("write", self._on_provider_change)
+
+        # Cowork sub-option — shown only when Claude is selected
+        self._cowork_frame = tk.Frame(
+            content, bg=COLORS["accent_light"],
+            padx=PAD["window"] + 16, pady=PAD["item"]
+        )
+        self._cowork_frame.pack(fill="x")
+
+        tk.Label(
+            self._cowork_frame,
+            text="How do you use Claude?",
+            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["accent_light"],
+            anchor="w"
+        ).pack(anchor="w", pady=(0, 4))
+
+        self._var_cowork = self._radio_group(
+            self._cowork_frame, "",
+            [
+                ("cowork", "Claude Desktop with Cowork"),
+                ("web",    "Web browser (claude.ai)"),
+            ],
+            default="cowork" if self.config.get("cowork_mode", False) else "web"
+        )
+
+        # Hide cowork frame if provider is not Claude
+        if self.config.get("llm_provider", "claude") != "claude":
+            self._cowork_frame.pack_forget()
 
         self._section_label(content, "Default report language")
         self._var_language = self._radio_group(
@@ -429,12 +642,25 @@ class SettingsWindow(BaseWindow):
             side="right", padx=(PAD["window"], 0)
         )
 
+    def _on_provider_change(self, *args):
+        if self._var_provider.get() == "claude":
+            self._cowork_frame.pack(fill="x")
+        else:
+            self._cowork_frame.pack_forget()
+
     def _save(self):
         from tools.installer import _write_global_config
+        provider = self._var_provider.get()
+        cowork_mode = (
+            self._var_cowork.get() == "cowork"
+            if provider == "claude"
+            else False
+        )
         updated = {
             **self.config,
-            "mip_root": self._var_root.get(),
-            "llm_provider": self._var_provider.get(),
+            "mip_root":         self._var_root.get(),
+            "llm_provider":     provider,
+            "cowork_mode":      cowork_mode,
             "default_language": self._var_language.get(),
         }
         _write_global_config(updated)
