@@ -366,8 +366,12 @@ def run_setup():
     print(f"\n  Root folder : {mip_root}")
     print(f"  Provider    : {provider.title()}")
     print(f"  Language    : {language.title()}")
-    print(f"\n  Next step:")
-    print(f"    mip project new   — create your first project")
+    print(f"\n  You're ready to go!")
+    print(f"\n  Next step — set up your first client project:")
+    print(f"\n    Run this command:")
+    print(f"\n       python mip.py project new")
+    print(f"\n    MeetingTool will ask you for the client name, project name,")
+    print(f"    and a few preferences. It takes about 2 minutes.")
     print()
 
     # ── Summary of issues ──

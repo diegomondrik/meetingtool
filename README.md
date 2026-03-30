@@ -15,22 +15,41 @@ Supports Claude, ChatGPT, and Gemini. Works on Windows, macOS, and Linux.
 
 ## Installation
 
+### Step 1 — Download MeetingTool
+
+Choose a folder on your computer where you want MeetingTool to live permanently.
+This is where the program files go — not your meetings or reports (those go somewhere else, and MeetingTool will ask you where during setup).
+
+Open a terminal in that folder and run:
+
 ```bash
-# 1. Clone the repository
 git clone https://github.com/diegomondrik/meetingtool.git
 cd meetingtool
+```
 
-# 2. Run setup (installs dependencies, creates folder structure, writes config)
+If you've never used `git clone` before: this command downloads MeetingTool into a new subfolder called `meetingtool` inside whichever folder your terminal is currently in. To control where it lands, navigate to your preferred folder first (e.g. `cd C:\Tools` on Windows or `cd ~/Applications` on Mac) before running the command.
+
+### Step 2 — Run the installer
+
+```bash
 python mip.py setup
 ```
 
-Setup will:
-- Verify Python 3.11+ and ffmpeg
-- Install Python dependencies (`opencv-python`, `python-docx`, `click`, `requests`)
-- Ask where to store your projects (`~/Documents/MeetingTool/` by default)
-- Ask which LLM provider you use (Claude / ChatGPT / Gemini)
-- Ask your default report language (English / Spanish)
-- Generate a synthetic test video for functional tests
+The installer will:
+- Check that Python, ffmpeg, and required packages are installed (and help you fix anything missing)
+- Ask where you want to store your projects and meeting recordings
+- Ask which AI tool you use (Claude, ChatGPT, or Gemini)
+- Ask your preferred report language (English or Spanish)
+- Set everything up automatically
+
+### Step 3 — Create your first project
+
+```bash
+python mip.py project new
+```
+
+MeetingTool will ask for the client name, project name, and a few preferences.
+At the end it prints the instructions you need to configure your AI tool — follow those before analyzing your first meeting.
 
 ---
 

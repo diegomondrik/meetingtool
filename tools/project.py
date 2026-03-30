@@ -160,10 +160,16 @@ def run_project_new():
     }
     _write_project_config(project_path, project_config)
 
-    # ── Generate and print prompt pack ──
-    merged = _merge_configs(global_config, project_config)
-    print()
-    generate_prompt_pack(merged, print_to_console=True)
+    # ── Determine prompt pack file path ──
+    provider_folder = {"claude": "claude", "chatgpt": "chatgpt", "gemini": "gemini"}.get(provider_choice, "claude")
+    mip_install_dir = Path(__file__).parent.parent
+    prompt_file = mip_install_dir / "prompt_pack" / provider_folder / "project_instructions.md"
+
+    # ── Save prompt pack to file ──
+    from tools.prompt_generator import generate_prompt_pack as _gen
+    pack_content = _gen(_merge_configs(global_config, project_config))
+    prompt_file.parent.mkdir(parents=True, exist_ok=True)
+    prompt_file.write_text(pack_content, encoding="utf-8")
 
     # ── Done ──
     print("\n" + "═" * 56)
@@ -172,11 +178,41 @@ def run_project_new():
     print(f"\n  Folder  : {project_path}")
     print(f"  Provider: {provider_choice.title()}")
     print(f"  Language: {language.title()}")
-    print(f"\n  Next steps:")
-    print(f"    1. Copy the prompt pack above into your LLM interface")
-    print(f"    2. Place your meeting MP4 + DOCX in a subfolder:")
-    print(f"       {project_path / '{MeetingName}_{YYYYMMDD}'}")
-    print(f"    3. Run: mip run --path <meeting_folder>")
+
+    # ── Next steps — provider-specific ──
+    print(f"\n  ─── Next steps ──────────────────────────────────────")
+
+    if provider_choice == "claude":
+        print(f"\n  Step 1 — Set up your Claude Project:")
+        print(f"    a. Go to claude.ai → Projects → New Project")
+        print(f"    b. Name it: {provider_ref or f'{client} — {project_name}'}")
+        print(f"    c. Open Project Instructions")
+        print(f"    d. Copy everything from this file and paste it there:")
+        print(f"\n       {prompt_file}")
+        print(f"\n    This only needs to be done once per project.")
+    elif provider_choice == "chatgpt":
+        print(f"\n  Step 1 — Set up your ChatGPT session:")
+        print(f"    At the start of each analysis session, copy everything")
+        print(f"    from this file and paste it as the first message:")
+        print(f"\n       {prompt_file}")
+    else:
+        print(f"\n  Step 1 — Set up your Gemini session:")
+        print(f"    At the start of each analysis session, copy everything")
+        print(f"    from this file and paste it as the System Instruction:")
+        print(f"\n       {prompt_file}")
+
+    print(f"\n  Step 2 — Add a meeting to analyze:")
+    print(f"    Create a folder for your meeting inside the project folder.")
+    print(f"    Name it: MeetingName_YYYYMMDD  (example: Kickoff_20260401)")
+    print(f"    Place the Teams recording (.mp4) and transcript (.docx) inside.")
+    print(f"\n    Your project folder is:")
+    print(f"       {project_path}")
+
+    print(f"\n  Step 3 — Process the meeting:")
+    print(f"    Run this command (replace the date and meeting name):")
+    print(f"\n       python mip.py run --path \"{project_path / 'MeetingName_YYYYMMDD'}\"")
+    print(f"\n    Or for web mode (Claude/ChatGPT/Gemini browser):")
+    print(f"\n       python mip.py run --path \"{project_path / 'MeetingName_YYYYMMDD'}\" --web")
     print()
 
 
