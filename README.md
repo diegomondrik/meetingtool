@@ -15,7 +15,39 @@ Supports Claude, ChatGPT, and Gemini. Works on Windows, macOS, and Linux.
 
 ## Installation
 
-### Step 1 — Download MeetingTool
+### Step 1 — Install Python 3.11+
+
+Download from: https://python.org/downloads
+
+> **Windows:** during installation, check **"Add Python to PATH"** before clicking Install.
+
+Verify it worked:
+```bash
+python --version
+```
+
+### Step 2 — Install ffmpeg
+
+ffmpeg is required for video frame extraction. Install it once and MeetingTool will find it automatically.
+
+**Windows:**
+1. Go to: https://ffmpeg.org/download.html → Windows → gyan.dev → download the **Release Full** build
+2. Extract to `C:\ffmpeg\`
+3. Add `C:\ffmpeg\bin` to your system PATH:
+   Win + X → System → Advanced system settings → Environment Variables → System Variables → Path → Edit → New → `C:\ffmpeg\bin` → OK
+4. Close and reopen your terminal, then verify: `ffmpeg -version`
+
+**macOS:**
+```bash
+brew install ffmpeg
+```
+
+**Linux:**
+```bash
+sudo apt install ffmpeg
+```
+
+### Step 3 — Download MeetingTool
 
 Choose a folder on your computer where you want MeetingTool to live permanently.
 This is where the program files go — not your meetings or reports (those go somewhere else, and MeetingTool will ask you where during setup).
@@ -29,7 +61,7 @@ cd meetingtool
 
 If you've never used `git clone` before: this command downloads MeetingTool into a new subfolder called `meetingtool` inside whichever folder your terminal is currently in. To control where it lands, navigate to your preferred folder first (e.g. `cd C:\Tools` on Windows or `cd ~/Applications` on Mac) before running the command.
 
-### Step 2 — Run the installer
+### Step 4 — Run the installer
 
 ```bash
 python mip.py setup
@@ -42,7 +74,7 @@ The installer will:
 - Ask your preferred report language (English or Spanish)
 - Set everything up automatically
 
-### Step 3 — Create your first project
+### Step 5 — Create your first project
 
 ```bash
 python mip.py project new
@@ -183,7 +215,7 @@ Generate the report in:
 
 ## Meeting types
 
-Four base types always available:
+Five base types always available:
 
 | Type | CLI key | Additional report sections |
 |------|---------|---------------------------|
@@ -191,6 +223,7 @@ Four base types always available:
 | Kickoff / Project start | `kickoff` | Project definition, team structure |
 | Status / Progress | `status` | Project status, delta since last meeting |
 | Technical / Analysis | `technical` | Technical decisions, visual analysis, dependencies |
+| Training / Enablement | `training` | Training context, comprehension assessment, gaps & follow-up, adoption next steps |
 
 Custom types can be added per project in `mip.config.json`.
 
