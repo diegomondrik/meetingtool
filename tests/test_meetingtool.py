@@ -457,6 +457,59 @@ class TestHandoffJson:
             assert field in loaded, f"Required field '{field}' missing from handoff JSON"
 
 
+# ── Test: Prompt generator ───────────────────────────────────────────────────
+
+class TestPromptGenerator:
+
+    def test_all_base_types_present(self):
+        """All 5 base types must be in MEETING_TYPE_SECTIONS."""
+        from tools.prompt_generator import MEETING_TYPE_SECTIONS
+        for t in ["discovery", "kickoff", "status", "technical", "training"]:
+            assert t in MEETING_TYPE_SECTIONS, f"Missing type: {t}"
+
+    def test_training_sections_present(self):
+        """Training type prompt must contain all 4 required section headers."""
+        from tools.prompt_generator import generate_meeting_prompt
+        config = {"llm_provider": "claude"}
+        prompt = generate_meeting_prompt(config, "english", meeting_type="training")
+        for section in ["Training Context", "Comprehension Assessment",
+                        "Gaps & Follow-up Material", "Adoption Next Steps"]:
+            assert section in prompt, f"Missing section in training prompt: {section}"
+
+    def test_segmentation_in_all_prompts(self):
+        """MEETING SEGMENTATION instruction must appear in every generated prompt."""
+        from tools.prompt_generator import generate_meeting_prompt
+        config = {"llm_provider": "claude"}
+        for meeting_type in ["discovery", "kickoff", "status", "technical", "training"]:
+            prompt = generate_meeting_prompt(config, "english", meeting_type=meeting_type)
+            assert "MEETING SEGMENTATION" in prompt, (
+                f"MEETING SEGMENTATION missing from {meeting_type} prompt"
+            )
+
+    def test_visual_extraction_in_pack(self):
+        """Project pack must instruct frame extraction, not just citation."""
+        from tools.prompt_generator import generate_prompt_pack
+        pack = generate_prompt_pack({"llm_provider": "claude", "client": "X", "project": "Y"})
+        assert "independent data source" in pack
+        assert "visual-only evidence" in pack
+
+    def test_fallback_includes_all_types(self):
+        """Fallback type list (no meeting_type specified) must include all 5 types."""
+        from tools.prompt_generator import generate_meeting_prompt
+        config = {"llm_provider": "claude"}
+        prompt = generate_meeting_prompt(config, "english", meeting_type=None)
+        for label in ["Discovery", "Kickoff", "Status", "Technical", "Training"]:
+            assert label in prompt, f"Missing type in fallback list: {label}"
+
+    def test_no_empty_project_line_without_ref(self):
+        """Claude pack must not contain a bare 'Project: ' line when ref is empty."""
+        from tools.prompt_generator import generate_prompt_pack
+        pack = generate_prompt_pack({"llm_provider": "claude", "client": "X",
+                                     "project": "Y", "llm_project_reference": ""})
+        assert "Project: \n" not in pack
+        assert pack.count("Project: ") == 0 or "Project: X" in pack or "Project: Y" in pack
+
+
 # ── Test: DOCX export ─────────────────────────────────────────────────────────
 
 class TestDocxExport:

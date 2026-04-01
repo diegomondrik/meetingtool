@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-from tools.setup import _ok, _warn, _err, _ask, _ask_choice, _load_global_config
+from tools.installer import _ok, _warn, _err, _ask, _ask_choice, _load_global_config
 from tools.prompt_generator import generate_prompt_pack
 
 
@@ -63,7 +63,7 @@ PROVIDER_PROJECT_LABELS = {
     "gemini":   "Gemini project reference (or leave blank for system instruction mode)",
 }
 
-MEETING_TYPES_DEFAULT = ["discovery", "kickoff", "status", "technical"]
+MEETING_TYPES_DEFAULT = ["discovery", "kickoff", "status", "technical", "training"]
 
 
 # ── Project creation ──────────────────────────────────────────────────────────

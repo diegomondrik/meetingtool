@@ -6,12 +6,9 @@ Produces provider-specific system instructions + meeting type variants.
 Handles two-pass Chat 1 / Chat 2 instruction blocks.
 """
 
-from pathlib import Path
-
-
 # ── Base system instructions (provider-agnostic) ─────────────────────────────
 
-BASE_SYSTEM = """You are a senior business analyst and AI integration specialist assisting an independent analytics and technology consultant working with corporate clients on data analytics, BI, and automation projects.
+BASE_SYSTEM = """You are a senior business analyst and AI integration specialist assisting an independent analytics and technology consultant working with corporate clients on data analytics, BI, AI solutions, planning and supply chain planning, and automation projects.
 
 CONTEXT:
 - Clients: corporate and non-corporate — retail, finance, logistics, and others
@@ -61,17 +58,29 @@ TONE:
 - Third person for client ("the client requested...", "the client's team noted...")
 
 IMAGE REFERENCES:
-When you mention a screen or visual from the meeting, reference it by filename:
-[frame_004_t00-14-32.jpg]
-The developer will verify the image locally. Include at least one image ref per 10 minutes of meeting.
+Treat every frame as an independent data source — not an illustration of what was said.
+For each frame, extract ALL structured information visible: field names, column headers,
+code logic, UI states, file names, data values, error messages, schema details, menu states.
+If a frame contains information the transcript did NOT mention, surface it explicitly
+and mark it as: (visual-only evidence).
+Reference frames by filename: [frame_004_t00-14-32.jpg]
+The developer will verify the image locally. Include at least one frame reference per 10 minutes of meeting.
 
 REPORT FORMAT:
-Always generate the report as a Markdown document with the standard sections listed in the prompt below. The developer will save it as report_{YYYYMMDD}.md."""
+Always generate the report as a Markdown (.md) file — never as DOCX, PDF, or any other format.
+Save the file as report_{YYYYMMDD}.md directly in the meeting folder you are working in.
+Do not create any other file types. The DOCX export is a separate step triggered manually by the developer.
 
 
 # ── Standard report sections ──────────────────────────────────────────────────
 
 STANDARD_SECTIONS = """
+MEETING SEGMENTATION:
+Before writing anything, identify whether the meeting contains multiple distinct
+topics, workstreams, or presenter blocks. If it does, treat each block as an
+independent unit of analysis. Do not merge findings, decisions, or action items
+across blocks. Label each block clearly in every section where it applies.
+
 STANDARD REPORT SECTIONS (always include all of these):
 
 ## Executive Summary
@@ -90,8 +99,14 @@ Table: Task | Owner | Deadline | Priority (High/Medium/Low)
 Include implied commitments that were never explicitly assigned — flag them as (implied).
 
 ## Screen Analysis
-For each relevant frame referenced: timestamp, content type, what was being discussed.
-Format: **[frame_XXX_tHH-MM-SS.jpg]** — {content type}: {what was visible and what was discussed}
+For each relevant frame: timestamp, content type, structured data extracted, and a
+"Key observation" connecting what is visible to a business or technical implication.
+Format:
+**[frame_XXX_tHH-MM-SS.jpg]** — {content type}
+- Visible: {exact fields, columns, values, code, UI state — be specific}
+- Context: {what was being discussed when this appeared}
+- Key observation: {what this confirms, reveals, or implies for the solution;
+  if the frame contains information not mentioned in the transcript, flag it explicitly}
 
 ## Pending Deliverables
 Table: What was promised | Who | When it was mentioned
@@ -177,6 +192,39 @@ When reviewing screens, specifically identify:
 - Dependencies on external systems or teams
 - Technical debt or limitations identified
 - Items requiring validation before continuing""",
+
+    "training": """
+ADDITIONAL SECTIONS FOR TRAINING / ENABLEMENT:
+
+## Training Context
+- Who is being trained (client team / internal G7) and their role
+- Topic or system being covered
+- Stated objective of the session — what the participant should be able to do after
+
+## Comprehension Assessment
+What the participant demonstrated they understood vs. what remained unclear.
+For each topic covered, note:
+- UNDERSTOOD: evidence from questions asked, correct usage, or explicit confirmation
+- UNCLEAR: hesitation, incorrect assumptions, questions that suggest the concept
+  didn't land, or topics that were re-explained multiple times
+- NOT COVERED: items that were in scope but not reached in this session
+
+## Technical Decisions
+Architecture or design decisions that emerged from the training discussion
+(questions that revealed gaps, corrections to assumptions, scope clarifications).
+Only populate if decisions occurred — write "None identified" if not.
+
+## Gaps & Follow-up Material
+- Concepts that need reinforcement before the next session
+- Questions raised but not fully answered during the session
+- Documentation, examples, or exercises that should be shared afterward
+- Prerequisites the participant is missing that are blocking understanding
+
+## Adoption Next Steps
+- What the participant is expected to do independently after this session
+- First concrete task or test they should attempt
+- Checkpoints or milestones to validate retention
+- Recommended timing for the next session or check-in""",
 }
 
 
@@ -252,7 +300,7 @@ def _wrap_for_claude(base: str, project_ref: str) -> str:
         "",
         "── END CLAUDE PROJECT INSTRUCTIONS ─────────────────────────",
     ]
-    return "\n".join(l for l in lines if l is not None)
+    return "\n".join(l for l in lines if l)
 
 
 def _wrap_for_chatgpt(base: str) -> str:
@@ -303,7 +351,7 @@ def generate_prompt_pack(config: dict, print_to_console: bool = False) -> str:
     custom_types = config.get("custom_meeting_types", [])
 
     meeting_types_str = ", ".join(
-        config.get("meeting_types", ["discovery", "kickoff", "status", "technical"])
+        config.get("meeting_types", ["discovery", "kickoff", "status", "technical", "training"])
         + custom_types
     )
 
@@ -364,7 +412,8 @@ MEETING TYPE: Select the type that matches this meeting and include the correspo
 Discovery additional sections: sales signals, project fit.
 Kickoff additional sections: project definition, team structure.
 Status additional sections: project status, delta since last meeting.
-Technical additional sections: technical decisions, visual analysis, dependencies."""
+Technical additional sections: technical decisions, visual analysis, dependencies.
+Training additional sections: training context, comprehension assessment, gaps & follow-up, adoption next steps."""
 
     # Two-pass block
     two_pass_block = ""
