@@ -27,10 +27,16 @@ REQUIRED_PACKAGES = [
 ]
 
 IMPORT_CHECK = {
-    "opencv-python": "cv2",
-    "python-docx":   "docx",
-    "click":         "click",
-    "requests":      "requests",
+    "opencv-python":          "cv2",
+    "opencv-python-headless": "cv2",
+    "python-docx":            "docx",
+    "click":                  "click",
+    "requests":               "requests",
+}
+
+# Fallback packages to try if primary install fails
+PACKAGE_FALLBACKS = {
+    "opencv-python": "opencv-python-headless",
 }
 
 MIN_PYTHON = (3, 11)
@@ -243,8 +249,23 @@ def check_dependencies() -> bool:
             if result.returncode == 0:
                 _ok(f"{pkg} — installed successfully")
             else:
-                _err(f"{pkg} — installation failed")
-                print(f"    Try manually: pip install {pkg}")
+                # Try fallback package if available
+                fallback = PACKAGE_FALLBACKS.get(pkg)
+                if fallback:
+                    _warn(f"{pkg} failed — trying fallback: {fallback}...")
+                    result2 = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", fallback],
+                        capture_output=True, text=True
+                    )
+                    if result2.returncode == 0:
+                        _ok(f"{fallback} — installed successfully")
+                        continue
+                    else:
+                        _err(f"{fallback} — also failed")
+                        print(f"    Try manually: pip install {fallback}")
+                else:
+                    _err(f"{pkg} — installation failed")
+                    print(f"    Try manually: pip install {pkg}")
                 all_ok = False
     return all_ok
 
