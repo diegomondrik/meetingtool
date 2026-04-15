@@ -175,12 +175,12 @@ class ProjectWindow(BaseWindow):
         thread.start()
 
     def _do_create(self):
-        import json
-        from datetime import datetime
-        from tools.prompt_generator import generate_prompt_pack
-        from tools.project import _merge_configs, MEETING_TYPES_DEFAULT
-
         try:
+            import json
+            from datetime import datetime
+            from tools.prompt_generator import generate_prompt_pack
+            from tools.project import _merge_configs, MEETING_TYPES_DEFAULT
+
             client  = self._var_client.get().strip()
             project = self._var_project.get().strip()
             provider = self._var_provider.get()
