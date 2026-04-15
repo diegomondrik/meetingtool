@@ -69,7 +69,7 @@ The developer will verify the image locally. Include at least one frame referenc
 REPORT FORMAT:
 Always generate the report as a Markdown (.md) file — never as DOCX, PDF, or any other format.
 Save the file as report_{YYYYMMDD}.md directly in the meeting folder you are working in.
-Do not create any other file types. The DOCX export is a separate step triggered manually by the developer.
+Do not create any other file types. The DOCX export is a separate step triggered manually by the developer."""
 
 
 # ── Standard report sections ──────────────────────────────────────────────────
