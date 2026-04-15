@@ -14,7 +14,7 @@ Usage:
 """
 
 import sys
-import click
+import subprocess
 from pathlib import Path
 
 # Verify Python version at import time
@@ -22,6 +22,17 @@ if sys.version_info < (3, 11):
     print(f"ERROR: MeetingTool requires Python 3.11+. Found: {sys.version}")
     print("Download Python 3.11+ from https://python.org")
     sys.exit(1)
+
+# Auto-install click if missing (required to bootstrap the CLI)
+try:
+    import click
+except ImportError:
+    print("Installing click (required to run MeetingTool)...")
+    result = subprocess.run([sys.executable, "-m", "pip", "install", "click"], capture_output=False)
+    if result.returncode != 0:
+        print("ERROR: Could not install click. Run: pip install click")
+        sys.exit(1)
+    import click
 
 
 @click.group()
