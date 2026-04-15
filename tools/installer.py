@@ -132,9 +132,79 @@ def check_ffmpeg() -> bool:
             return True
         except Exception:
             pass
+
     _err("ffmpeg not found in PATH")
+
+    # Offer automatic installation
+    pkg_manager = _detect_ffmpeg_installer()
+    if pkg_manager:
+        choice = _ask(f"Install ffmpeg automatically via {pkg_manager}? (y/n)", "y")
+        if choice.lower() == "y":
+            installed = _auto_install_ffmpeg(pkg_manager)
+            if installed:
+                # Re-check PATH (may need terminal restart on Windows)
+                if shutil.which("ffmpeg"):
+                    _ok("ffmpeg installed and available.")
+                    return True
+                else:
+                    _warn(
+                        "ffmpeg was installed but is not yet in this terminal's PATH.\n"
+                        "  Close and reopen your terminal, then run 'python mip.py setup' again."
+                    )
+                    return False
+
     _print_ffmpeg_install_guide()
     return False
+
+
+def _detect_ffmpeg_installer() -> str | None:
+    """Return the name of the available package manager that can install ffmpeg, or None."""
+    system = platform.system()
+    if system == "Windows":
+        if shutil.which("winget"):
+            return "winget"
+        if shutil.which("choco"):
+            return "choco"
+    elif system == "Darwin":
+        if shutil.which("brew"):
+            return "brew"
+    else:
+        if shutil.which("apt-get"):
+            return "apt-get"
+        if shutil.which("dnf"):
+            return "dnf"
+    return None
+
+
+def _auto_install_ffmpeg(pkg_manager: str) -> bool:
+    """Run the package manager to install ffmpeg. Returns True if the command succeeded."""
+    commands = {
+        "winget": ["winget", "install", "Gyan.FFmpeg",
+                   "--accept-package-agreements", "--accept-source-agreements"],
+        "choco":  ["choco", "install", "ffmpeg", "-y"],
+        "brew":   ["brew", "install", "ffmpeg"],
+        "apt-get":["sudo", "apt-get", "install", "-y", "ffmpeg"],
+        "dnf":    ["sudo", "dnf", "install", "-y", "ffmpeg"],
+    }
+    cmd = commands.get(pkg_manager)
+    if not cmd:
+        return False
+
+    print(f"\n  Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, timeout=300)
+        if result.returncode == 0:
+            _ok(f"ffmpeg installed via {pkg_manager}.")
+            return True
+        else:
+            _err(f"{pkg_manager} exited with code {result.returncode}.")
+            return False
+    except subprocess.TimeoutExpired:
+        _err("Installation timed out after 5 minutes.")
+        return False
+    except Exception as e:
+        _err(f"Installation error: {e}")
+        return False
 
 
 def _print_ffmpeg_install_guide():
