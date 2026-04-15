@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from datetime import date
 
-from tools.setup import _ok, _warn, _err
+from tools.installer import _ok, _warn, _err
 
 
 # ── Regex for image refs ──────────────────────────────────────────────────────
