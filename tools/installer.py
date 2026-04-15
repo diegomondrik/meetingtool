@@ -347,6 +347,65 @@ def create_folder_structure(mip_root: Path) -> bool:
         return False
 
 
+# ── Multiple Python detection ────────────────────────────────────────────────
+
+def check_multiple_pythons() -> None:
+    """Warn if multiple Python versions are detected (Windows only)."""
+    if platform.system() != "Windows":
+        return
+    try:
+        result = subprocess.run(
+            ["py", "--list"], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return
+        lines = [
+            l.strip() for l in result.stdout.splitlines()
+            if l.strip() and not l.startswith("-") and not l.startswith("Installed")
+        ]
+        if len(lines) > 1:
+            _warn("Multiple Python versions detected on this machine:")
+            for line in lines:
+                print(f"      {line}")
+            _warn(
+                f"Setup is using: {sys.executable}\n"
+                "  A launcher (MeetingTool.bat) will be created so double-click\n"
+                "  always uses this Python — not whichever is the Windows default."
+            )
+    except Exception:
+        pass  # py launcher not available — skip silently
+
+
+# ── Windows launcher ──────────────────────────────────────────────────────────
+
+def create_launcher() -> bool:
+    """Create MeetingTool.bat using the exact Python that ran setup (Windows only)."""
+    if platform.system() != "Windows":
+        return True
+
+    python_path = Path(sys.executable)
+    # Prefer pythonw.exe — runs GUI without opening a terminal window
+    pythonw = python_path.parent / "pythonw.exe"
+    launch_exe = str(pythonw) if pythonw.exists() else str(python_path)
+
+    script_dir = Path(__file__).parent.parent.resolve()
+    bat_path   = script_dir / "MeetingTool.bat"
+
+    bat_content = (
+        "@echo off\n"
+        f'start "" "{launch_exe}" "{script_dir / "MeetingTool.py"}"\n'
+    )
+
+    try:
+        bat_path.write_text(bat_content, encoding="utf-8")
+        _ok(f"Launcher created: MeetingTool.bat  (using {Path(launch_exe).name})")
+        print(f"  → Double-click MeetingTool.bat to open MeetingTool.")
+        return True
+    except Exception as e:
+        _warn(f"Could not create launcher: {e}")
+        return False
+
+
 # ── Existing install detection ────────────────────────────────────────────────
 
 def detect_existing_install() -> dict | None:
@@ -386,6 +445,7 @@ def run_setup():
     if not python_ok:
         print("\n  Setup cannot continue without Python 3.11+.")
         sys.exit(1)
+    check_multiple_pythons()
 
     # ── Step 2: ffmpeg ──
     _print_step(2, "ffmpeg")
@@ -459,9 +519,14 @@ def run_setup():
         "llm_provider": provider,
         "cowork_mode": cowork_mode,
         "default_language": language,
+        "python_exe": sys.executable,
         "installed_at": datetime.now().strftime("%Y-%m-%d"),
     }
     _write_global_config(config)
+
+    # ── Step 8: Windows launcher ──
+    _print_step(8, "Windows launcher")
+    create_launcher()
 
     # ── Done ──
     print("\n" + "═" * 56)
