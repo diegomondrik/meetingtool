@@ -180,66 +180,67 @@ class ProjectWindow(BaseWindow):
         from tools.prompt_generator import generate_prompt_pack
         from tools.project import _merge_configs, MEETING_TYPES_DEFAULT
 
-        client  = self._var_client.get().strip()
-        project = self._var_project.get().strip()
-        provider = self._var_provider.get()
-        language = self._var_language.get()
-        provider_ref = self._var_ref.get().strip() if provider == "claude" else ""
-        project_path = Path(self._var_folder.get()).expanduser().resolve()
-
-        cowork_mode = self.global_config.get("cowork_mode", False)
-
-        # Parse custom types
-        custom_raw = self._var_custom_types.get().strip()
-        custom_types = [
-            t.strip().lower().replace(" ", "_")
-            for t in custom_raw.split(",")
-            if t.strip()
-        ] if custom_raw else []
-
-        # Create folder
         try:
+            client  = self._var_client.get().strip()
+            project = self._var_project.get().strip()
+            provider = self._var_provider.get()
+            language = self._var_language.get()
+            provider_ref = self._var_ref.get().strip() if provider == "claude" else ""
+            project_path = Path(self._var_folder.get()).expanduser().resolve()
+
+            cowork_mode = self.global_config.get("cowork_mode", False)
+
+            # Parse custom types
+            custom_raw = self._var_custom_types.get().strip()
+            custom_types = [
+                t.strip().lower().replace(" ", "_")
+                for t in custom_raw.split(",")
+                if t.strip()
+            ] if custom_raw else []
+
+            # Create folder
             project_path.mkdir(parents=True, exist_ok=True)
+
+            # Write project config
+            project_config = {
+                "client": client,
+                "project": project,
+                "llm_provider": provider,
+                "llm_project_reference": provider_ref,
+                "project_folder": str(project_path),
+                "report_language": language,
+                "meeting_types": MEETING_TYPES_DEFAULT,
+                "custom_meeting_types": custom_types,
+                "created_at": datetime.now().strftime("%Y-%m-%d"),
+            }
+
+            cfg_path = project_path / "mip.config.json"
+            with open(cfg_path, "w") as f:
+                json.dump(project_config, f, indent=2)
+
+            # Generate and save prompt pack
+            merged = _merge_configs(self.global_config, project_config)
+            pack_content = generate_prompt_pack(merged)
+
+            mip_root = Path(self.global_config.get("mip_root", ""))
+            provider_folder = provider
+            prompt_file = mip_root / "prompt_pack" / provider_folder / "project_instructions.md"
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(pack_content, encoding="utf-8")
+
+            self.after(0, lambda: self._finish_success(
+                client, project, project_path, prompt_file,
+                provider, cowork_mode
+            ))
+
         except Exception as e:
+            error_msg = str(e)
             self.after(0, lambda: (
                 self._btn_create.configure(state="normal", text="Create Project"),
                 self._status.configure(
-                    text=f"Could not create folder: {e}", fg=COLORS["error"]
+                    text=f"Error: {error_msg}", fg=COLORS["error"]
                 )
             ))
-            return
-
-        # Write project config
-        project_config = {
-            "client": client,
-            "project": project,
-            "llm_provider": provider,
-            "llm_project_reference": provider_ref,
-            "project_folder": str(project_path),
-            "report_language": language,
-            "meeting_types": MEETING_TYPES_DEFAULT,
-            "custom_meeting_types": custom_types,
-            "created_at": datetime.now().strftime("%Y-%m-%d"),
-        }
-
-        cfg_path = project_path / "mip.config.json"
-        with open(cfg_path, "w") as f:
-            json.dump(project_config, f, indent=2)
-
-        # Generate and save prompt pack
-        merged = _merge_configs(self.global_config, project_config)
-        pack_content = generate_prompt_pack(merged)
-
-        mip_root = Path(self.global_config.get("mip_root", ""))
-        provider_folder = provider
-        prompt_file = mip_root / "prompt_pack" / provider_folder / "project_instructions.md"
-        prompt_file.parent.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(pack_content, encoding="utf-8")
-
-        self.after(0, lambda: self._finish_success(
-            client, project, project_path, prompt_file,
-            provider, cowork_mode
-        ))
 
     def _finish_success(self, client, project, project_path,
                         prompt_file, provider, cowork_mode):
