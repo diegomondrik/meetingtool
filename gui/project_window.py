@@ -248,7 +248,7 @@ class ProjectWindow(BaseWindow):
         self._btn_create.configure(bg=COLORS["success"])
         self._status.configure(text="Project created!", fg=COLORS["success"])
 
-        # Show next steps in a results window
+        # Show next steps in a results window — closing it also closes this wizard
         ResultsWindow(
             self.master,
             client=client,
@@ -257,6 +257,7 @@ class ProjectWindow(BaseWindow):
             prompt_file=prompt_file,
             provider=provider,
             cowork_mode=cowork_mode,
+            on_close=self.destroy,
         )
 
         if self.on_complete:
@@ -267,11 +268,17 @@ class ResultsWindow(BaseWindow):
     """Shows next steps after project creation."""
 
     def __init__(self, parent, client, project, project_path,
-                 prompt_file, provider, cowork_mode):
+                 prompt_file, provider, cowork_mode, on_close=None):
         super().__init__(parent, "Project Ready", width=680, height=560)
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._on_close = on_close
+        self.protocol("WM_DELETE_WINDOW", self._close)
         self._build(client, project, project_path,
                     prompt_file, provider, cowork_mode)
+
+    def _close(self):
+        if self._on_close:
+            self._on_close()
+        self.destroy()
 
     def _build(self, client, project, project_path,
                prompt_file, provider, cowork_mode):
@@ -417,5 +424,5 @@ class ResultsWindow(BaseWindow):
         footer.pack(fill="x", side="bottom")
 
         self._primary_button(
-            footer, "Got it — open MeetingTool", self.destroy
+            footer, "Got it — open MeetingTool", self._close
         ).pack(side="right", padx=PAD["window"])

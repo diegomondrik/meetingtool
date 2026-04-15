@@ -517,7 +517,8 @@ class MainWindow(BaseWindow):
         except SystemExit:
             self.after(0, lambda: self._analysis_error("Analysis stopped — check the output above."))
         except Exception as e:
-            self.after(0, lambda: self._analysis_error(str(e)))
+            msg = str(e)
+            self.after(0, lambda: self._analysis_error(msg))
         finally:
             logger.removeHandler(handler)
 
@@ -718,7 +719,8 @@ class MainWindow(BaseWindow):
             docx_path = meeting_path / f"report_{date.today().strftime('%Y%m%d')}.docx"
             self.after(0, lambda: self._export_done(docx_path, output_format))
         except Exception as e:
-            self.after(0, lambda: self._append_status(f"  Export error: {e}", "err"))
+            msg = str(e)
+            self.after(0, lambda: self._append_status(f"  Export error: {msg}", "err"))
 
     def _export_done(self, docx_path: Path, output_format: str):
         self._append_status("  Export complete!", "ok")
