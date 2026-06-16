@@ -16,7 +16,14 @@ from tools.installer import _ok, _warn, _err
 
 # ── Regex for image refs ──────────────────────────────────────────────────────
 
+# Format A: exact filename  [frame_017_t00-13-03.jpg]
 _IMAGE_REF = re.compile(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]')
+
+# Format B: Claude report style  [frame_017, t00:13:03]
+# Range refs like [frames_001–016, ...] are intentionally NOT matched —
+# they are descriptive text, not single-frame embeds.
+_IMAGE_REF_ALT = re.compile(r'\[frame_(\d+),\s*t(\d{2}):(\d{2}):(\d{2})\]')
+
 _EXPORT_TRIGGERS = {"send", "deliver", "client", "final"}
 
 
@@ -37,31 +44,50 @@ def _resolve_image_refs(
 ) -> tuple[list[tuple[str, Path]], list[str]]:
     """
     Find all image refs in the report and resolve them to actual file paths.
+    Supports two formats:
+      A) [frame_017_t00-13-03.jpg]  — exact filename (legacy / system-generated)
+      B) [frame_017, t00:13:03]     — Claude report style (number + timestamp)
+    Range refs like [frames_001–016, ...] are skipped (descriptive, not embeds).
     Returns:
         resolved:  list of (ref_string, file_path)
-        missing:   list of ref_strings that could not be resolved
+        missing:   list of filenames that could not be resolved
     """
-    refs     = _IMAGE_REF.findall(report_text)
+    seen     = set()
     resolved = []
     missing  = []
 
-    for ref in refs:
-        filename = ref.strip("[]")
-        file_path = frames_dir / filename
+    # Format A: exact filename refs
+    for ref in _IMAGE_REF.findall(report_text):
+        if ref in seen:
+            continue
+        seen.add(ref)
+        file_path = frames_dir / ref.strip("[]")
         if file_path.exists():
             resolved.append((ref, file_path))
         else:
-            missing.append(filename)
+            missing.append(ref.strip("[]"))
 
-    # Deduplicate while preserving order
-    seen     = set()
-    deduped  = []
-    for ref, path in resolved:
-        if ref not in seen:
-            deduped.append((ref, path))
-            seen.add(ref)
+    # Format B: [frame_NNN, t00:13:03] → frame_NNN_t00-13-03.jpg
+    for m in _IMAGE_REF_ALT.finditer(report_text):
+        ref = m.group(0)
+        if ref in seen:
+            continue
+        seen.add(ref)
+        num      = m.group(1).zfill(3)
+        hh, mm, ss = m.group(2), m.group(3), m.group(4)
+        filename = f"frame_{num}_t{hh}-{mm}-{ss}.jpg"
+        exact    = frames_dir / filename
+        if exact.exists():
+            resolved.append((ref, exact))
+        else:
+            # Timestamp in ref may differ slightly from filename; match by frame number
+            candidates = sorted(frames_dir.glob(f"frame_{num}_t*.jpg"))
+            if candidates:
+                resolved.append((ref, candidates[0]))
+            else:
+                missing.append(filename)
 
-    return deduped, missing
+    return resolved, missing
 
 
 # ── Markdown → DOCX conversion ────────────────────────────────────────────────
@@ -189,8 +215,12 @@ def _resolve_inline_refs(text: str, ref_map: dict) -> tuple[str, list]:
     """
     Find image refs in a text line and return (cleaned_text, list_of_image_paths).
     Image refs are replaced with a placeholder in the text.
+    Handles both format A (exact filename) and format B (Claude report style).
     """
-    refs_found = _IMAGE_REF.findall(text)
+    refs_found = (
+        _IMAGE_REF.findall(text)
+        + [m.group(0) for m in _IMAGE_REF_ALT.finditer(text)]
+    )
     paths = []
     for ref in refs_found:
         if ref in ref_map:
@@ -206,8 +236,8 @@ def _add_inline_content(paragraph, text: str, ref_paths: list, doc):
     """
     from docx.shared import Inches, Pt
 
-    # Add text with formatting (strip image placeholders)
-    clean_text = re.sub(r'\[IMAGE:\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]\]', '', text).strip()
+    # Add text with formatting (strip image placeholders for both ref formats)
+    clean_text = re.sub(r'\[IMAGE:\[frame[^\]]+\]\]', '', text).strip()
     if clean_text:
         _add_formatted_text(paragraph, clean_text)
 
