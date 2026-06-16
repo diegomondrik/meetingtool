@@ -10,7 +10,6 @@ Run via: mip export --path <meeting_folder>
 
 import re
 from pathlib import Path
-from datetime import date
 
 from tools.installer import _ok, _warn, _err
 
@@ -368,11 +367,11 @@ def run_export(
         format_map = {"1": "docx", "2": "md", "3": "both"}
         output_format = format_map.get(choice, "docx")
 
-    today_str = date.today().strftime("%Y%m%d")
+    # DOCX name matches the source .md (same stem, different extension)
+    docx_path = meeting_folder / f"{report_path.stem}.docx"
 
     # Generate DOCX
     if output_format in ("docx", "both"):
-        docx_path = meeting_folder / f"report_{today_str}.docx"
         print(f"\n  Generating DOCX: {docx_path.name}")
         print(f"  Embedding {len(resolved)} image(s)...")
         try:
@@ -388,5 +387,5 @@ def run_export(
     print()
     print("  Export complete.")
     if output_format in ("docx", "both"):
-        print(f"  Ready for client delivery: {meeting_folder / f'report_{today_str}.docx'}")
+        print(f"  Ready for client delivery: {docx_path}")
     print()
