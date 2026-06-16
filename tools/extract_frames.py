@@ -83,21 +83,26 @@ def zone_score(prev_gray, curr_gray, grid_rows: int = 3, grid_cols: int = 4,
 def edge_score(prev_gray, curr_gray,
                canny_low: int = 50, canny_high: int = 150) -> float:
     """
-    Canny edge detection on both frames.
+    Sobel edge detection on both frames (replaces cv2.Canny).
     Score = normalized absolute difference in edge density.
     High score = new text appeared, slide transition, annotation added.
-    More stable than pixel diff for content-heavy screens.
     """
-    import cv2
     import numpy as np
 
-    prev_edges = cv2.Canny(prev_gray, canny_low, canny_high)
-    curr_edges = cv2.Canny(curr_gray, canny_low, canny_high)
+    def _edge_density(gray):
+        g = gray.astype(np.float32)
+        pad = np.pad(g, 1, mode='edge')
+        gx = (pad[:-2, 2:] - pad[:-2, :-2]
+              + 2 * (pad[1:-1, 2:] - pad[1:-1, :-2])
+              + pad[2:, 2:] - pad[2:, :-2])
+        gy = (pad[2:, :-2] - pad[:-2, :-2]
+              + 2 * (pad[2:, 1:-1] - pad[:-2, 1:-1])
+              + pad[2:, 2:] - pad[:-2, 2:])
+        return float(np.mean(np.sqrt(gx ** 2 + gy ** 2) > canny_low))
 
-    prev_density = float(np.mean(prev_edges > 0))
-    curr_density = float(np.mean(curr_edges > 0))
+    prev_density = _edge_density(prev_gray)
+    curr_density = _edge_density(curr_gray)
 
-    # Normalized absolute change in edge density
     max_density = max(prev_density, curr_density, 0.001)
     return abs(curr_density - prev_density) / max_density
 
@@ -189,24 +194,27 @@ def extract_frames(
         Number of frames saved.
     """
     try:
-        import cv2
+        import av
         import numpy as np
-    except ImportError:
-        log.error("Missing dependency: pip install opencv-python")
+        from PIL import Image
+    except ImportError as exc:
+        log.error(f"Missing dependency: pip install av pillow numpy  ({exc})")
         raise
 
-    import sys
-
     log.info(f"Opening video: {video_path.name}")
-    cap = cv2.VideoCapture(str(video_path))
+    try:
+        container = av.open(str(video_path))
+    except Exception as exc:
+        log.error(f"Cannot open video: {video_path} — {exc}")
+        raise RuntimeError(f"Cannot open video: {video_path}") from exc
 
-    if not cap.isOpened():
-        log.error(f"Cannot open video: {video_path}")
-        raise RuntimeError(f"Cannot open video: {video_path}")
-
-    total_fps      = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames_v = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration_secs  = total_frames_v / total_fps if total_fps > 0 else 0
+    video_stream   = container.streams.video[0]
+    total_fps      = float(video_stream.average_rate or 30.0)
+    total_frames_v = video_stream.frames or 0
+    if video_stream.duration and video_stream.time_base:
+        duration_secs = float(video_stream.duration * video_stream.time_base)
+    else:
+        duration_secs = total_frames_v / total_fps if total_fps > 0 else 0.0
 
     log.info(
         f"Video: {total_frames_v} frames @ {total_fps:.1f} fps — "
@@ -218,67 +226,69 @@ def extract_frames(
     for old in output_dir.glob("frame_*.jpg"):
         old.unlink()
 
-    step = max(1, int(total_fps / fps_analyze))
+    analyze_interval = 1.0 / fps_analyze  # seconds between sampled frames
 
-    prev_gray           = None
-    candidates          = []   # list of (timestamp, score, frame_bgr)
-    saved_timestamps    = []   # timestamps already selected (for temporal scoring)
-    last_saved_t        = -min_gap - 1
-    frame_idx           = 0
-    read_count          = 0
+    prev_gray        = None
+    candidates       = []   # list of (timestamp, score, img_rgb ndarray)
+    saved_timestamps = []
+    last_saved_t     = -min_gap - 1
+    last_analyzed_t  = -analyze_interval
+    read_count       = 0
 
-    log.info(f"Analyzing at {fps_analyze} fps (step={step} frames)...")
+    log.info(f"Analyzing at {fps_analyze} fps (interval={analyze_interval:.2f}s)...")
 
-    while True:
-        ret = cap.grab()
-        if not ret:
-            break
-
-        if frame_idx % step != 0:
-            frame_idx += 1
+    for frame in container.decode(video=0):
+        if frame.pts is None:
             continue
+        timestamp = float(frame.pts * video_stream.time_base)
 
-        ret, frame_bgr = cap.retrieve()
-        if not ret:
-            frame_idx += 1
+        # Sample at fps_analyze rate
+        if timestamp - last_analyzed_t < analyze_interval:
             continue
-
+        last_analyzed_t = timestamp
         read_count += 1
-        timestamp = frame_idx / total_fps
+
+        # Full frame as RGB numpy array
+        img_rgb = frame.to_ndarray(format='rgb24')  # (H, W, 3)
 
         # Apply ROI: strip Teams camera bar from top
-        h, w = frame_bgr.shape[:2]
-        roi_y      = int(h * roi_top)
-        frame_roi  = frame_bgr[roi_y:, :]
-        curr_gray  = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2GRAY)
+        h, w    = img_rgb.shape[:2]
+        roi_y   = int(h * roi_top)
+        img_roi = img_rgb[roi_y:, :]
+
+        # Grayscale via luminance weights
+        curr_gray = (
+            0.299 * img_roi[:, :, 0].astype(np.float32)
+            + 0.587 * img_roi[:, :, 1].astype(np.float32)
+            + 0.114 * img_roi[:, :, 2].astype(np.float32)
+        ).astype(np.uint8)
 
         if prev_gray is not None and (timestamp - last_saved_t) >= min_gap:
             score = composite_score(
-                prev_gray         = prev_gray,
-                curr_gray         = curr_gray,
-                timestamp         = timestamp,
-                duration          = duration_secs,
-                budget            = budget,
+                prev_gray           = prev_gray,
+                curr_gray           = curr_gray,
+                timestamp           = timestamp,
+                duration            = duration_secs,
+                budget              = budget,
                 existing_timestamps = saved_timestamps,
             )
 
             if score >= min_composite_score:
-                candidates.append((timestamp, score, frame_bgr.copy()))
+                candidates.append((timestamp, score, img_rgb.copy()))
                 saved_timestamps.append(timestamp)
                 last_saved_t = timestamp
 
-        prev_gray  = curr_gray
-        frame_idx += 1
+        prev_gray = curr_gray
 
         # Progress every 5 minutes
-        if frame_idx % (int(total_fps) * 300) == 0:
+        if read_count % (int(total_fps / analyze_interval) * 300 // int(total_fps)) == 0 and read_count > 0:
             log.info(
                 f"  Progress: {seconds_to_display_ts(timestamp)} / "
                 f"{seconds_to_display_ts(duration_secs)} — "
                 f"{len(candidates)} candidates"
             )
 
-    cap.release()
+    container.close()
     log.info(f"Analyzed {read_count} frames. Candidates: {len(candidates)}")
 
     # Apply budget: keep top-N by composite score, then re-sort chronologically
@@ -288,13 +298,13 @@ def extract_frames(
         candidates = candidates[:budget]
         candidates.sort(key=lambda x: x[0])
 
-    # Save frames
+    # Save frames using Pillow
     saved = 0
-    for i, (ts, score, frame_bgr) in enumerate(candidates, start=1):
+    for i, (ts, score, img_rgb) in enumerate(candidates, start=1):
         ts_str   = seconds_to_filename_ts(ts)
         filename = f"frame_{i:03d}_{ts_str}.jpg"
         out_path = output_dir / filename
-        cv2.imwrite(str(out_path), frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        Image.fromarray(img_rgb).save(str(out_path), "JPEG", quality=85)
         saved += 1
         log.info(f"  [{i:03d}] {filename}  (score={score:.3f})")
 
@@ -422,14 +432,17 @@ def get_video_duration(video_path: Path) -> float:
         )
         return float(result.stdout.strip())
     except Exception:
-        # Fallback: use OpenCV
         try:
-            import cv2
-            cap = cv2.VideoCapture(str(video_path))
-            fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            cap.release()
-            return frames / fps
+            import av
+            container = av.open(str(video_path))
+            vs = container.streams.video[0]
+            if vs.duration and vs.time_base:
+                dur = float(vs.duration * vs.time_base)
+            else:
+                fps = float(vs.average_rate or 30.0)
+                dur = (vs.frames or 0) / fps
+            container.close()
+            return dur
         except Exception:
             return 0.0
 

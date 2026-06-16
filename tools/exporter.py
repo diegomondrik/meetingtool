@@ -9,7 +9,6 @@ Run via: mip export --path <meeting_folder>
 """
 
 import re
-import sys
 from pathlib import Path
 from datetime import date
 
@@ -85,8 +84,7 @@ def _md_to_docx(
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
     except ImportError:
-        _err("Missing dependency: pip install python-docx")
-        sys.exit(1)
+        raise ImportError("python-docx not installed — run: pip install python-docx")
 
     # Build a lookup: ref_string → file_path
     ref_map = {ref: path for ref, path in resolved_refs}
@@ -315,14 +313,14 @@ def run_export(meeting_folder: Path, output_format: str | None):
 
     if not meeting_folder.exists():
         _err(f"Meeting folder not found: {meeting_folder}")
-        sys.exit(1)
+        raise RuntimeError(f"Meeting folder not found: {meeting_folder}")
 
     # Find report.md
     report_path = _find_report_md(meeting_folder)
     if not report_path:
         _err("No report_*.md found in this folder.")
         print("  Generate a report first by running 'mip run' and completing the LLM analysis.")
-        sys.exit(1)
+        raise RuntimeError("No report_*.md found in this folder")
 
     _ok(f"Report found: {report_path.name}")
     report_text = report_path.read_text(encoding="utf-8")
@@ -349,7 +347,7 @@ def run_export(meeting_folder: Path, output_format: str | None):
         print("  Options:")
         print("    1. Run 'mip run' again to regenerate frames")
         print("    2. Remove the missing refs from report.md")
-        sys.exit(1)
+        raise RuntimeError(f"Cannot export: {len(missing)} image reference(s) not found in imagenes_reunion\\")
 
     # Recommend format if not specified
     if output_format is None:
@@ -377,7 +375,7 @@ def run_export(meeting_folder: Path, output_format: str | None):
             _ok(f"DOCX saved: {docx_path}")
         except Exception as e:
             _err(f"DOCX generation failed: {e}")
-            sys.exit(1)
+            raise RuntimeError(f"DOCX generation failed: {e}") from e
 
     if output_format in ("md", "both"):
         _ok(f"Markdown report: {report_path.name} (already exists)")

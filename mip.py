@@ -148,11 +148,14 @@ def run(meeting_folder, web, two_pass, single_pass, max_frames):
 )
 def export(meeting_folder, output_format):
     """Export report.md to DOCX with embedded images."""
-    from tools.exporter import run_export
-    run_export(
-        meeting_folder=Path(meeting_folder),
-        output_format=output_format,
-    )
+    try:
+        from tools.exporter import run_export
+        run_export(
+            meeting_folder=Path(meeting_folder),
+            output_format=output_format,
+        )
+    except (RuntimeError, ImportError):
+        sys.exit(1)  # Error already printed by run_export
 
 
 # ── Handoff (two-pass) ───────────────────────────────────────────────────────

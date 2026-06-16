@@ -158,7 +158,7 @@ class ProjectWindow(BaseWindow):
             self._ref_frame.pack_forget()
 
     def _run_create(self):
-        # Validate required fields
+        # Validate required fields — must run in main thread
         client = self._var_client.get().strip()
         project = self._var_project.get().strip()
 
@@ -169,39 +169,49 @@ class ProjectWindow(BaseWindow):
             messagebox.showwarning("Missing info", "Please enter a project name.")
             return
 
+        # Read ALL tkinter vars here (main thread) before handing off to worker
+        provider     = self._var_provider.get()
+        language     = self._var_language.get()
+        provider_ref = self._var_ref.get().strip() if provider == "claude" else ""
+        folder_str   = self._var_folder.get()
+        custom_raw   = self._var_custom_types.get().strip()
+
         self._btn_create.configure(state="disabled", text="Creating…")
         self._status.configure(text="Setting up project…", fg=COLORS["text_muted"])
-        thread = threading.Thread(target=self._do_create, daemon=True)
+
+        params = dict(
+            client=client, project=project, provider=provider,
+            language=language, provider_ref=provider_ref,
+            folder_str=folder_str, custom_raw=custom_raw,
+        )
+        thread = threading.Thread(target=self._do_create, args=(params,), daemon=True)
         thread.start()
 
-    def _do_create(self):
+    def _do_create(self, params: dict):
+        import json
+        from datetime import datetime
+        from tools.prompt_generator import generate_prompt_pack
+        from tools.project import _merge_configs, MEETING_TYPES_DEFAULT
+
         try:
-            import json
-            from datetime import datetime
-            from tools.prompt_generator import generate_prompt_pack
-            from tools.project import _merge_configs, MEETING_TYPES_DEFAULT
+            client       = params["client"]
+            project      = params["project"]
+            provider     = params["provider"]
+            language     = params["language"]
+            provider_ref = params["provider_ref"]
+            project_path = Path(params["folder_str"]).expanduser().resolve()
+            custom_raw   = params["custom_raw"]
+            cowork_mode  = self.global_config.get("cowork_mode", False)
 
-            client  = self._var_client.get().strip()
-            project = self._var_project.get().strip()
-            provider = self._var_provider.get()
-            language = self._var_language.get()
-            provider_ref = self._var_ref.get().strip() if provider == "claude" else ""
-            project_path = Path(self._var_folder.get()).expanduser().resolve()
-
-            cowork_mode = self.global_config.get("cowork_mode", False)
-
-            # Parse custom types
-            custom_raw = self._var_custom_types.get().strip()
             custom_types = [
                 t.strip().lower().replace(" ", "_")
                 for t in custom_raw.split(",")
                 if t.strip()
             ] if custom_raw else []
 
-            # Create folder
             project_path.mkdir(parents=True, exist_ok=True)
 
-            # Write project config
+
             project_config = {
                 "client": client,
                 "project": project,
@@ -218,13 +228,11 @@ class ProjectWindow(BaseWindow):
             with open(cfg_path, "w") as f:
                 json.dump(project_config, f, indent=2)
 
-            # Generate and save prompt pack
             merged = _merge_configs(self.global_config, project_config)
             pack_content = generate_prompt_pack(merged)
 
             mip_root = Path(self.global_config.get("mip_root", ""))
-            provider_folder = provider
-            prompt_file = mip_root / "prompt_pack" / provider_folder / "project_instructions.md"
+            prompt_file = mip_root / "prompt_pack" / provider / "project_instructions.md"
             prompt_file.parent.mkdir(parents=True, exist_ok=True)
             prompt_file.write_text(pack_content, encoding="utf-8")
 
