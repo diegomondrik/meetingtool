@@ -306,7 +306,11 @@ def _should_recommend_docx(report_text: str) -> tuple[bool, str]:
 
 # ── Main export flow ──────────────────────────────────────────────────────────
 
-def run_export(meeting_folder: Path, output_format: str | None):
+def run_export(
+    meeting_folder: Path,
+    output_format: str | None,
+    report_path: Path | None = None,
+):
     print("\n" + "═" * 56)
     print("  MeetingTool v2.0 — Export Report")
     print("═" * 56)
@@ -315,9 +319,10 @@ def run_export(meeting_folder: Path, output_format: str | None):
         _err(f"Meeting folder not found: {meeting_folder}")
         raise RuntimeError(f"Meeting folder not found: {meeting_folder}")
 
-    # Find report.md
-    report_path = _find_report_md(meeting_folder)
-    if not report_path:
+    # Use provided report path or auto-discover the most recent one
+    if report_path is None:
+        report_path = _find_report_md(meeting_folder)
+    if not report_path or not report_path.exists():
         _err("No report_*.md found in this folder.")
         print("  Generate a report first by running 'mip run' and completing the LLM analysis.")
         raise RuntimeError("No report_*.md found in this folder")

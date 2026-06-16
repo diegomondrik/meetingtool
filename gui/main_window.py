@@ -665,31 +665,36 @@ class MainWindow(BaseWindow):
             messagebox.showerror("Error", f"Could not open file:\n{e}")
 
     def _export_docx(self):
-        """Export the most recent report.md to DOCX with embedded images."""
+        """Export a report.md to DOCX with embedded images."""
         meeting_folder = self._var_meeting.get().strip()
         if not meeting_folder:
             messagebox.showwarning("No folder", "Please select a meeting folder first.")
             return
 
         meeting_path = Path(meeting_folder)
-        reports = sorted(meeting_path.glob("report_*.md"), reverse=True)
+        reports = sorted(meeting_path.glob("*.md"), reverse=True)
         if not reports:
             messagebox.showinfo(
                 "No report found",
-                f"No report_*.md found in:\n{meeting_path}\n\n"
+                f"No .md files found in:\n{meeting_path}\n\n"
                 "Run Analyze first to generate the report."
             )
             return
 
-        report = reports[0]
+        # Let user pick if multiple .md files exist
+        if len(reports) > 1:
+            report = MdFilePickerDialog(self, reports).result
+            if report is None:
+                return  # cancelled
+        else:
+            report = reports[0]
 
         # Count image refs to inform the user
         import re
-        text = report.read_text(encoding="utf-8")
-        refs  = re.findall(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]', text)
+        text   = report.read_text(encoding="utf-8")
+        refs   = re.findall(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]', text)
         n_refs = len(refs)
 
-        # Ask format
         msg = f"Report: {report.name}\n"
         if n_refs > 3:
             msg += f"Contains {n_refs} image references — DOCX recommended.\n\n"
@@ -701,30 +706,46 @@ class MainWindow(BaseWindow):
         if choice is None:
             return  # cancelled
 
-        # Run export in background thread
+        # Start progress bar and disable button
+        self._btn_export.configure(state="disabled", text="Exporting…")
+        self._analysis_running = True
+        self._start_progress()
         self._append_status(f"  Exporting {report.name} → {choice.upper()}…")
+
         thread = threading.Thread(
             target=self._do_export,
-            args=(meeting_path, choice),
+            args=(meeting_path, choice, report),
             daemon=True
         )
         thread.start()
 
-    def _do_export(self, meeting_path: Path, output_format: str):
+    def _do_export(self, meeting_path: Path, output_format: str, report_path: Path):
         try:
             from tools.exporter import run_export
-            run_export(meeting_folder=meeting_path, output_format=output_format)
-
-            from datetime import date
-            docx_path = meeting_path / f"report_{date.today().strftime('%Y%m%d')}.docx"
-            self.after(0, lambda: self._export_done(docx_path, output_format))
+            run_export(
+                meeting_folder=meeting_path,
+                output_format=output_format,
+                report_path=report_path,
+            )
+            # Find the DOCX that was just created
+            docx_files = sorted(meeting_path.glob("*.docx"), reverse=True)
+            docx_path  = docx_files[0] if docx_files else None
+            self.after(0, lambda: self._export_done(docx_path, output_format, meeting_path, report_path))
         except Exception as e:
             msg = str(e)
-            self.after(0, lambda: self._append_status(f"  Export error: {msg}", "err"))
+            self.after(0, lambda: (
+                self._stop_progress(success=False),
+                self._btn_export.configure(state="normal", text="Export to DOCX"),
+                self._append_status(f"  Export error: {msg}", "err"),
+            ))
 
-    def _export_done(self, docx_path: Path, output_format: str):
+    def _export_done(self, docx_path: Path | None, output_format: str,
+                    meeting_path: Path, report_path: Path):
+        self._stop_progress(success=True)
+        self._btn_export.configure(state="normal", text="Export to DOCX")
         self._append_status("  Export complete!", "ok")
-        if output_format in ("docx", "both"):
+
+        if output_format in ("docx", "both") and docx_path:
             self._append_status(f"  DOCX saved: {docx_path}")
             import platform, subprocess
             open_folder = messagebox.askyesno(
@@ -732,14 +753,32 @@ class MainWindow(BaseWindow):
                 f"DOCX saved:\n{docx_path}\n\nOpen the folder?"
             )
             if open_folder:
-                folder = docx_path.parent
                 system = platform.system()
                 if system == "Windows":
                     subprocess.Popen(f'explorer /select,"{docx_path}"')
                 elif system == "Darwin":
                     subprocess.Popen(["open", "-R", str(docx_path)])
                 else:
-                    subprocess.Popen(["xdg-open", str(folder)])
+                    subprocess.Popen(["xdg-open", str(docx_path.parent)])
+
+        # Offer to rename imagenes_reunion → {mp4_stem}_{report_stem}
+        frames_dir = meeting_path / "imagenes_reunion"
+        if frames_dir.exists():
+            mp4_files = list(meeting_path.glob("*.mp4"))
+            if mp4_files:
+                new_name = f"{mp4_files[0].stem}_{report_path.stem}"
+                answer   = messagebox.askyesno(
+                    "Rename frames folder?",
+                    f"Do you want to rename the frames folder?\n\n"
+                    f"From:  imagenes_reunion\n"
+                    f"To:    {new_name}"
+                )
+                if answer:
+                    try:
+                        frames_dir.rename(meeting_path / new_name)
+                        self._append_status(f"  Folder renamed → {new_name}", "ok")
+                    except Exception as exc:
+                        self._append_status(f"  Could not rename folder: {exc}", "err")
 
     def _new_project(self):
         from gui.project_window import ProjectWindow
@@ -814,6 +853,60 @@ class ExportFormatDialog(tk.Toplevel):
 
     def _choose(self, value: str):
         self.result = value
+        self.destroy()
+
+
+class MdFilePickerDialog(tk.Toplevel):
+    """Dialog to choose which .md file to export when multiple exist."""
+
+    def __init__(self, parent, reports: list):
+        super().__init__(parent)
+        self.title("MeetingTool — Select report")
+        self.configure(bg=COLORS["bg"])
+        self.resizable(False, False)
+        self.result = None
+        self.grab_set()
+
+        btn_h = 44
+        h = min(140 + len(reports) * btn_h, 480)
+        w = 440
+        x = (self.winfo_screenwidth()  - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        tk.Label(
+            self,
+            text="Multiple .md files found.\nSelect the one to export:",
+            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"],
+            justify="left", wraplength=380, padx=20, pady=16,
+        ).pack(anchor="w")
+
+        btn_frame = tk.Frame(self, bg=COLORS["bg"], padx=20, pady=4)
+        btn_frame.pack(fill="x")
+
+        for report in reports:
+            tk.Button(
+                btn_frame, text=report.name,
+                font=FONTS["body"],
+                bg=COLORS["bg_card"], fg=COLORS["text"],
+                relief="flat", cursor="hand2",
+                highlightthickness=1,
+                highlightbackground=COLORS["border"],
+                padx=12, pady=6, anchor="w",
+                command=lambda r=report: self._choose(r),
+            ).pack(fill="x", pady=2)
+
+        tk.Button(
+            btn_frame, text="Cancel",
+            font=FONTS["small"], fg=COLORS["text_muted"],
+            bg=COLORS["bg"], relief="flat", cursor="hand2",
+            command=self.destroy,
+        ).pack(pady=(8, 0))
+
+        self.wait_window()
+
+    def _choose(self, report: Path):
+        self.result = report
         self.destroy()
 
 
