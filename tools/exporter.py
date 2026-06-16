@@ -20,9 +20,11 @@ from tools.installer import _ok, _warn, _err
 _IMAGE_REF = re.compile(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]')
 
 # Format B: Claude report style  [frame_017, t00:13:03]
+# Captures only the frame number; timestamp is ignored during resolution
+# (we glob by number so timestamp drift never blocks a match).
 # Range refs like [frames_001–016, ...] are intentionally NOT matched —
 # they are descriptive text, not single-frame embeds.
-_IMAGE_REF_ALT = re.compile(r'\[frame_(\d+),\s*t(\d{2}):(\d{2}):(\d{2})\]')
+_IMAGE_REF_ALT = re.compile(r'\[frame_(\d+),\s*t\d{2}:\d{2}:\d{2}\]')
 
 _EXPORT_TRIGGERS = {"send", "deliver", "client", "final"}
 
@@ -67,25 +69,18 @@ def _resolve_image_refs(
         else:
             missing.append(ref.strip("[]"))
 
-    # Format B: [frame_NNN, t00:13:03] → frame_NNN_t00-13-03.jpg
+    # Format B: [frame_NNN, t...] — resolve by frame number only (glob)
     for m in _IMAGE_REF_ALT.finditer(report_text):
         ref = m.group(0)
         if ref in seen:
             continue
         seen.add(ref)
-        num      = m.group(1).zfill(3)
-        hh, mm, ss = m.group(2), m.group(3), m.group(4)
-        filename = f"frame_{num}_t{hh}-{mm}-{ss}.jpg"
-        exact    = frames_dir / filename
-        if exact.exists():
-            resolved.append((ref, exact))
+        num        = m.group(1).zfill(3)
+        candidates = sorted(frames_dir.glob(f"frame_{num}_t*.jpg"))
+        if candidates:
+            resolved.append((ref, candidates[0]))
         else:
-            # Timestamp in ref may differ slightly from filename; match by frame number
-            candidates = sorted(frames_dir.glob(f"frame_{num}_t*.jpg"))
-            if candidates:
-                resolved.append((ref, candidates[0]))
-            else:
-                missing.append(filename)
+            missing.append(f"frame_{num}_t*.jpg")
 
     return resolved, missing
 
@@ -323,6 +318,15 @@ def _render_table(doc, table_lines: list):
     doc.add_paragraph()
 
 
+# ── Post-export image verification ───────────────────────────────────────────
+
+def _count_embedded_images(docx_path: Path) -> int:
+    """Return the number of images actually embedded in the DOCX."""
+    from docx import Document
+    doc = Document(str(docx_path))
+    return sum(1 for rel in doc.part.rels.values() if "image" in rel.reltype)
+
+
 # ── Export recommendation logic ───────────────────────────────────────────────
 
 def _should_recommend_docx(report_text: str) -> tuple[bool, str]:
@@ -406,10 +410,22 @@ def run_export(
         print(f"  Embedding {len(resolved)} image(s)...")
         try:
             _md_to_docx(report_text, resolved, docx_path, meeting_folder)
-            _ok(f"DOCX saved: {docx_path}")
         except Exception as e:
             _err(f"DOCX generation failed: {e}")
             raise RuntimeError(f"DOCX generation failed: {e}") from e
+
+        # Verify images are actually in the file
+        actual = _count_embedded_images(docx_path)
+        if resolved and actual == 0:
+            _err(f"DOCX generated but contains 0 images — {len(resolved)} were expected.")
+            raise RuntimeError(
+                f"Export produced an empty DOCX (no images embedded). "
+                f"Check that imagenes_reunion\\ exists and contains the frames."
+            )
+        elif actual < len(resolved):
+            _warn(f"DOCX contains {actual} of {len(resolved)} expected images.")
+        else:
+            _ok(f"DOCX saved: {docx_path.name}  ({actual} image(s) embedded)")
 
     if output_format in ("md", "both"):
         _ok(f"Markdown report: {report_path.name} (already exists)")
