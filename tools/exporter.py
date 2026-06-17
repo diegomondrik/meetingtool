@@ -19,12 +19,15 @@ from tools.installer import _ok, _warn, _err
 # Format A: exact filename  [frame_017_t00-13-03.jpg]
 _IMAGE_REF = re.compile(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]')
 
-# Format B: Claude report style  [frame_017, t00:13:03]
-# Captures only the frame number; timestamp is ignored during resolution
-# (we glob by number so timestamp drift never blocks a match).
-# Range refs like [frames_001–016, ...] are intentionally NOT matched —
-# they are descriptive text, not single-frame embeds.
+# Format B: single frame, Claude report style  [frame_017, t00:13:03]
+# Resolves by frame number only (glob), ignoring the timestamp.
 _IMAGE_REF_ALT = re.compile(r'\[frame_(\d+),\s*t\d{2}:\d{2}:\d{2}\]')
+
+# Format C: frame range, Claude report style  [frames_019–024, t00:13:37–t00:17:57]
+# en-dash (–) or hyphen (-) between frame numbers; expands to all frames in range.
+_IMAGE_REF_RANGE = re.compile(
+    r'\[frames_(\d+)[–\-](\d+),\s*t\d{2}:\d{2}:\d{2}[–\-]t\d{2}:\d{2}:\d{2}\]'
+)
 
 _EXPORT_TRIGGERS = {"send", "deliver", "client", "final"}
 
@@ -46,13 +49,15 @@ def _resolve_image_refs(
 ) -> tuple[list[tuple[str, Path]], list[str]]:
     """
     Find all image refs in the report and resolve them to actual file paths.
-    Supports two formats:
-      A) [frame_017_t00-13-03.jpg]  — exact filename (legacy / system-generated)
-      B) [frame_017, t00:13:03]     — Claude report style (number + timestamp)
-    Range refs like [frames_001–016, ...] are skipped (descriptive, not embeds).
+    Supports three formats:
+      A) [frame_017_t00-13-03.jpg]           — exact filename
+      B) [frame_017, t00:13:03]              — single frame, Claude style
+      C) [frames_019–024, t00:13:37–t00:17:57] — frame range, Claude style
+    One (ref_string, file_path) tuple is added per resolved file, so a range
+    ref produces multiple tuples (one per frame in the range).
     Returns:
         resolved:  list of (ref_string, file_path)
-        missing:   list of filenames that could not be resolved
+        missing:   list of descriptions for refs that could not be resolved
     """
     seen     = set()
     resolved = []
@@ -82,6 +87,22 @@ def _resolve_image_refs(
         else:
             missing.append(f"frame_{num}_t*.jpg")
 
+    # Format C: [frames_NNN–MMM, t...–t...] — expand range, one tuple per frame
+    for m in _IMAGE_REF_RANGE.finditer(report_text):
+        ref = m.group(0)
+        if ref in seen:
+            continue
+        seen.add(ref)
+        start, end = int(m.group(1)), int(m.group(2))
+        found_any  = False
+        for n in range(start, end + 1):
+            candidates = sorted(frames_dir.glob(f"frame_{str(n).zfill(3)}_t*.jpg"))
+            if candidates:
+                resolved.append((ref, candidates[0]))
+                found_any = True
+        if not found_any:
+            missing.append(f"frames_{m.group(1)}–{m.group(2)}_t*.jpg")
+
     return resolved, missing
 
 
@@ -106,8 +127,10 @@ def _md_to_docx(
     except ImportError:
         raise ImportError("python-docx not installed — run: pip install python-docx")
 
-    # Build a lookup: ref_string → file_path
-    ref_map = {ref: path for ref, path in resolved_refs}
+    # Build a lookup: ref_string → [path, ...] (list because ranges map to multiple frames)
+    ref_map: dict = {}
+    for ref, path in resolved_refs:
+        ref_map.setdefault(ref, []).append(path)
 
     doc = Document()
 
@@ -209,17 +232,20 @@ def _md_to_docx(
 def _resolve_inline_refs(text: str, ref_map: dict) -> tuple[str, list]:
     """
     Find image refs in a text line and return (cleaned_text, list_of_image_paths).
-    Image refs are replaced with a placeholder in the text.
-    Handles both format A (exact filename) and format B (Claude report style).
+    Image refs are replaced with a single placeholder; ref_map[ref] is a list of
+    paths so one placeholder can expand to multiple embedded images (for ranges).
     """
     refs_found = (
         _IMAGE_REF.findall(text)
         + [m.group(0) for m in _IMAGE_REF_ALT.finditer(text)]
+        + [m.group(0) for m in _IMAGE_REF_RANGE.finditer(text)]
     )
     paths = []
     for ref in refs_found:
-        if ref in ref_map:
-            paths.append((ref, ref_map[ref]))
+        img_paths = ref_map.get(ref, [])
+        if img_paths:
+            for p in img_paths:
+                paths.append((ref, p))
             text = text.replace(ref, f"[IMAGE:{ref}]")
     return text, paths
 
