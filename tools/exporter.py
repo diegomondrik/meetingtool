@@ -20,14 +20,11 @@ from tools.installer import _ok, _warn, _err
 _IMAGE_REF = re.compile(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]')
 
 # Format B: single frame, Claude report style  [frame_017, t00:13:03]
-# Resolves by frame number only (glob), ignoring the timestamp.
+# Only single-frame refs trigger image embedding — the LLM uses this format
+# when it explicitly decides a frame is worth showing in the document.
+# Range refs [frames_019–024, ...] are descriptive groupings and are never
+# embedded; the LLM already decided those frames don't need individual display.
 _IMAGE_REF_ALT = re.compile(r'\[frame_(\d+),\s*t\d{2}:\d{2}:\d{2}\]')
-
-# Format C: frame range, Claude report style  [frames_019–024, t00:13:37–t00:17:57]
-# en-dash (–) or hyphen (-) between frame numbers; expands to all frames in range.
-_IMAGE_REF_RANGE = re.compile(
-    r'\[frames_(\d+)[–\-](\d+),\s*t\d{2}:\d{2}:\d{2}[–\-]t\d{2}:\d{2}:\d{2}\]'
-)
 
 _EXPORT_TRIGGERS = {"send", "deliver", "client", "final"}
 
@@ -48,13 +45,10 @@ def _resolve_image_refs(
     frames_dir: Path,
 ) -> tuple[list[tuple[str, Path]], list[str]]:
     """
-    Find all image refs in the report and resolve them to actual file paths.
-    Supports three formats:
-      A) [frame_017_t00-13-03.jpg]           — exact filename
-      B) [frame_017, t00:13:03]              — single frame, Claude style
-      C) [frames_019–024, t00:13:37–t00:17:57] — frame range, Claude style
-    One (ref_string, file_path) tuple is added per resolved file, so a range
-    ref produces multiple tuples (one per frame in the range).
+    Find all single-frame image refs and resolve them to file paths.
+    Only formats A and B trigger embedding — range refs are descriptive text.
+      A) [frame_017_t00-13-03.jpg]  — exact filename
+      B) [frame_017, t00:13:03]     — single frame, Claude report style
     Returns:
         resolved:  list of (ref_string, file_path)
         missing:   list of descriptions for refs that could not be resolved
@@ -86,22 +80,6 @@ def _resolve_image_refs(
             resolved.append((ref, candidates[0]))
         else:
             missing.append(f"frame_{num}_t*.jpg")
-
-    # Format C: [frames_NNN–MMM, t...–t...] — expand range, one tuple per frame
-    for m in _IMAGE_REF_RANGE.finditer(report_text):
-        ref = m.group(0)
-        if ref in seen:
-            continue
-        seen.add(ref)
-        start, end = int(m.group(1)), int(m.group(2))
-        found_any  = False
-        for n in range(start, end + 1):
-            candidates = sorted(frames_dir.glob(f"frame_{str(n).zfill(3)}_t*.jpg"))
-            if candidates:
-                resolved.append((ref, candidates[0]))
-                found_any = True
-        if not found_any:
-            missing.append(f"frames_{m.group(1)}–{m.group(2)}_t*.jpg")
 
     return resolved, missing
 
@@ -238,7 +216,6 @@ def _resolve_inline_refs(text: str, ref_map: dict) -> tuple[str, list]:
     refs_found = (
         _IMAGE_REF.findall(text)
         + [m.group(0) for m in _IMAGE_REF_ALT.finditer(text)]
-        + [m.group(0) for m in _IMAGE_REF_RANGE.finditer(text)]
     )
     paths = []
     for ref in refs_found:

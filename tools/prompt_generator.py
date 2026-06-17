@@ -63,8 +63,22 @@ For each frame, extract ALL structured information visible: field names, column 
 code logic, UI states, file names, data values, error messages, schema details, menu states.
 If a frame contains information the transcript did NOT mention, surface it explicitly
 and mark it as: (visual-only evidence).
-Reference frames by filename: [frame_004_t00-14-32.jpg]
-The developer will verify the image locally. Include at least one frame reference per 10 minutes of meeting.
+
+Two reference formats — use the right one for the right purpose:
+
+[frame_017, t00:13:03]
+Use this format when the frame itself adds value that the text alone cannot convey —
+a screen with data, a dashboard, code, a diagram, an error, a file listing.
+This format triggers image embedding in the exported DOCX. Only use it when the image
+genuinely earns its place: unique content, not already covered by an adjacent frame.
+
+[frames_019–024, t00:13:37–t00:17:57]
+Use this format to document a block of frames that are descriptive in aggregate but
+do not need to be shown individually — participant thumbnails, a frozen menu screen,
+a slow scroll through repetitive rows. This format is text-only in the DOCX export;
+no images are embedded.
+
+Include at least one embeddable frame reference ([frame_NNN, ...]) per 10 minutes of meeting.
 
 REPORT FORMAT:
 Always generate the report as a Markdown (.md) file — never as DOCX, PDF, or any other format.
