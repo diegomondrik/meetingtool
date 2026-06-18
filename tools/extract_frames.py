@@ -1,5 +1,5 @@
 """
-tools/extract_frames.py — MeetingTool v2.0
+tools/extract_frames.py — MeetingTool v2.5
 ==========================================
 Intelligent frame selection using three-signal scoring algorithm:
   Signal 1 — Zone-based structural change (weight: 0.4)
@@ -8,6 +8,10 @@ Intelligent frame selection using three-signal scoring algorithm:
 
 Replaces v1's brute global-mean-diff approach.
 Works for both Workflow A (Cowork, budget=150) and Workflow B (web, budget=20).
+
+v2.5 additions:
+  - 720p resolution cap (LANCZOS) applied at save time to reduce Gemini token cost
+  - SSIM perceptual similarity gate: frames with SSIM > 0.95 vs previous saved are discarded
 
 Also handles transcript DOCX → .txt parsing (carried over from v1, cleaned up).
 """
@@ -18,6 +22,10 @@ from pathlib import Path
 from datetime import timedelta
 
 log = logging.getLogger("extract_frames")
+
+MAX_WIDTH           = 1280
+MAX_HEIGHT          = 720
+SSIM_DISCARD_THRESHOLD = 0.95
 
 
 # ── Timestamp utilities ───────────────────────────────────────────────────────
@@ -298,15 +306,42 @@ def extract_frames(
         candidates = candidates[:budget]
         candidates.sort(key=lambda x: x[0])
 
-    # Save frames using Pillow
-    saved = 0
-    for i, (ts, score, img_rgb) in enumerate(candidates, start=1):
-        ts_str   = seconds_to_filename_ts(ts)
-        filename = f"frame_{i:03d}_{ts_str}.jpg"
-        out_path = output_dir / filename
-        Image.fromarray(img_rgb).save(str(out_path), "JPEG", quality=85)
+    # Save frames — apply 720p cap and SSIM similarity gate
+    from skimage.metrics import structural_similarity as ssim_fn
+
+    saved           = 0
+    last_saved_gray = None
+
+    for ts, score, img_rgb in candidates:
+        pil_img = Image.fromarray(img_rgb)
+
+        # 720p cap: resize if wider or taller than the limit (preserve aspect ratio)
+        w, h = pil_img.size
+        if w > MAX_WIDTH or h > MAX_HEIGHT:
+            scale   = min(MAX_WIDTH / w, MAX_HEIGHT / h)
+            pil_img = pil_img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        # SSIM gate: discard if perceptually identical to last saved frame
+        curr_gray = np.array(pil_img.convert("L"))
+        if last_saved_gray is not None:
+            prev = last_saved_gray
+            if prev.shape != curr_gray.shape:
+                from PIL import Image as _PIL
+                prev = np.array(
+                    _PIL.fromarray(prev).resize(pil_img.size, _PIL.LANCZOS).convert("L")
+                )
+            similarity = ssim_fn(prev, curr_gray)
+            if similarity > SSIM_DISCARD_THRESHOLD:
+                log.debug(f"  [skip] SSIM={similarity:.3f} > {SSIM_DISCARD_THRESHOLD} — duplicate discarded")
+                continue
+
         saved += 1
-        log.info(f"  [{i:03d}] {filename}  (score={score:.3f})")
+        ts_str   = seconds_to_filename_ts(ts)
+        filename = f"frame_{saved:03d}_{ts_str}.jpg"
+        out_path = output_dir / filename
+        pil_img.save(str(out_path), "JPEG", quality=85)
+        last_saved_gray = curr_gray
+        log.info(f"  [{saved:03d}] {filename}  (score={score:.3f})")
 
     log.info(f"✓ {saved} frames saved to: {output_dir}")
     return saved
