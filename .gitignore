@@ -10,6 +10,7 @@ projects/
 *.MP4
 *.docx
 *.txt
+!requirements.txt
 imagenes_reunion/
 report_*.md
 report_*.docx

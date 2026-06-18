@@ -1,0 +1,24 @@
+# MeetingTool v2.5 - runtime + build dependencies
+# Verified on Python 3.13.5, Windows ARM64.
+
+# --- Core runtime (Cowork/web GUI flow) ---
+customtkinter==5.2.2     # dark-mode GUI
+python-docx==1.2.0       # DOCX export
+scikit-image==0.26.0     # SSIM frame de-duplication
+numpy==2.4.6             # frame math (Sobel, SSIM)
+pillow==12.2.0           # image resize / processing
+requests==2.34.2         # HTTP (Gemini REST client)
+keyring==25.7.0          # Windows Credential Manager access
+click==8.4.1             # mip.py CLI
+
+# --- Build ---
+pyinstaller>=6.21.0      # win_arm64 wheel; supports Python 3.13
+
+# --- Optional: automated pipeline (dormant - not reachable from the GUI) ---
+# Needed only to run tools/claude_client.py or the test suite's TestClaudeClient.
+# Excluded from the frozen binary via MeetingTool.spec (excludes=['anthropic']).
+anthropic==0.109.2
+# pytesseract           # OCR fallback - install + Tesseract binary only if reviving the pipeline
+
+# Note: ffmpeg is a system dependency (must be on PATH), not a Python package.
+# The app detects it and guides installation if missing.

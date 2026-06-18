@@ -248,7 +248,32 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-Tests require Python 3.11+, ffmpeg, opencv-python, and python-docx.
+Tests require Python 3.11+, ffmpeg, scikit-image, pillow, and python-docx.
+
+---
+
+## Building the executable
+
+MeetingTool can be packaged into a standalone Windows executable so it runs on
+machines without a Python install.
+
+```powershell
+pip install -r requirements.txt
+.\build.ps1
+```
+
+Output: `dist\MeetingTool\MeetingTool.exe` (onedir bundle — distribute the whole
+`dist\MeetingTool\` folder).
+
+**Notes:**
+- Verified on **Python 3.13, Windows ARM64, PyInstaller 6.21.0**.
+- **ffmpeg is not bundled** — it stays a system dependency. The app detects it
+  on PATH and guides installation if missing. Install it on the target machine
+  (the first-run setup screen explains how).
+- The automated API pipeline (`anthropic`) is **excluded** from the binary; the
+  packaged app uses the Cowork / web subscription flow only.
+- Config (`mip.config.json`) is written next to `MeetingTool.exe`, so the bundle
+  is portable — copy the folder anywhere.
 
 ---
 

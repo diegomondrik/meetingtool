@@ -20,24 +20,25 @@ from datetime import datetime
 # ── Constants ────────────────────────────────────────────────────────────────
 
 REQUIRED_PACKAGES = [
-    "opencv-python",
+    "customtkinter",
     "python-docx",
+    "scikit-image",
+    "pillow",
     "click",
     "requests",
 ]
 
 IMPORT_CHECK = {
-    "opencv-python":          "cv2",
-    "opencv-python-headless": "cv2",
-    "python-docx":            "docx",
-    "click":                  "click",
-    "requests":               "requests",
+    "customtkinter": "customtkinter",
+    "python-docx":   "docx",
+    "scikit-image":  "skimage",
+    "pillow":        "PIL",
+    "click":         "click",
+    "requests":      "requests",
 }
 
 # Fallback packages to try if primary install fails
-PACKAGE_FALLBACKS = {
-    "opencv-python": "opencv-python-headless",
-}
+PACKAGE_FALLBACKS = {}
 
 MIN_PYTHON = (3, 11)
 
@@ -92,7 +93,13 @@ def _ask_choice(prompt: str, choices: dict, default_key: str) -> str:
 
 
 def _config_path() -> Path:
-    """Return the path to the global mip.config.json."""
+    """Return the path to the global mip.config.json.
+
+    Frozen (PyInstaller): config lives next to the executable so the app
+    stays portable. Dev: config lives in the package root (meetingtool/).
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "mip.config.json"
     script_dir = Path(__file__).parent.parent.resolve()
     return script_dir / "mip.config.json"
 
