@@ -1,10 +1,11 @@
 """
-tools/runner.py — MeetingTool v2.0
+tools/runner.py — MeetingTool v2.5
 ====================================
 Orchestrates the meeting analysis workflows:
-  - Workflow A: Cowork (full frame budget, prompt to clipboard)
-  - Workflow B standard: web, < 45 min (20 frames, upload checklist)
-  - Workflow B two-pass: web, >= 45 min (20 frames per half, handoff JSON)
+  - Workflow A (automated): Cowork — extract_frames -> Gemini vision -> Claude report
+  - Workflow A (legacy):    Cowork — full frame budget, prompt to clipboard
+  - Workflow B standard:    web, < 45 min (20 frames, upload checklist)
+  - Workflow B two-pass:    web, >= 45 min (20 frames per half, handoff JSON)
 
 Returns structured AnalysisResult for both GUI and CLI.
 """
@@ -26,6 +27,9 @@ from tools.extract_frames import (
     seconds_to_display_ts,
 )
 from tools.prompt_generator import generate_meeting_prompt
+from tools.gemini_client import extract_visual_evidence, GeminiUnavailableError
+from tools.claude_client import generate_report, write_report
+from tools.api_config import get_gemini_key, get_anthropic_key
 
 log = logging.getLogger("runner")
 
@@ -52,6 +56,8 @@ class AnalysisResult:
     handoff_path: Path | None = None
     provider: str = "claude"
     cowork_mode: bool = False
+    report_path: Path | None = None          # set by automated pipeline
+    visual_evidence_source: str = ""         # "gemini" | "ocr_fallback" | ""
 
 
 # ── Config helpers ────────────────────────────────────────────────────────────
@@ -349,6 +355,127 @@ def save_handoff(meeting_folder: Path):
     print(f"\n  You can now start Chat 2.")
 
 
+# ── v2.5: OCR fallback ───────────────────────────────────────────────────────
+
+def _ocr_fallback(frame_paths: list[Path]) -> str:
+    """
+    Run Tesseract OCR on each frame. Called only when Gemini is unavailable.
+    Returns concatenated per-frame text, or empty string when pytesseract or
+    Tesseract is not installed (degrade gracefully per §6 fallback rule).
+    """
+    try:
+        import pytesseract
+        from PIL import Image as _PIL_Image
+    except ImportError:
+        log.warning("pytesseract not installed — OCR fallback skipped")
+        return ""
+
+    results = []
+    for i, path in enumerate(frame_paths):
+        try:
+            text = pytesseract.image_to_string(_PIL_Image.open(path)).strip()
+            if text:
+                results.append(f"[FRAME {i + 1}]\n{text}")
+        except Exception as exc:
+            log.warning(f"OCR skipped {path.name}: {exc}")
+
+    if not results:
+        log.warning("OCR fallback produced no extractable text")
+        return ""
+
+    combined = "\n\n".join(results)
+    log.info(f"OCR fallback: {len(results)} frame(s) produced text ({len(combined)} chars)")
+    return combined
+
+
+# ── v2.5: Workflow A (automated) ─────────────────────────────────────────────
+
+def _run_cowork_automated(
+    meeting_folder: Path,
+    video_path: Path,
+    transcript_path: Path | None,
+    config: dict,
+    max_frames_override: int | None,
+) -> AnalysisResult:
+    """
+    Full automated pipeline: extract_frames -> Gemini vision -> Claude report.
+    Falls back to pytesseract OCR if Gemini is unavailable (GeminiUnavailableError).
+    """
+    budget     = max_frames_override or COWORK_FRAME_BUDGET
+    frames_dir = frames_output_dir(meeting_folder)
+
+    log.info(f"Workflow A (automated) | budget: {budget} frames")
+    log.info(f"Video: {video_path.name}")
+
+    n_frames    = extract_frames(video_path=video_path, output_dir=frames_dir, budget=budget)
+    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+
+    # ── Transcript ────────────────────────────────────────────────────────────
+    txt_path        = None
+    transcript_text = ""
+    if transcript_path:
+        txt_path        = parse_transcript_docx(transcript_path, meeting_folder)
+        transcript_text = txt_path.read_text(encoding="utf-8")
+        log.info(f"Transcript: {txt_path.name} ({len(transcript_text)} chars)")
+
+    project_lang = config.get("report_language", "english")
+    report_lang  = project_lang
+    if txt_path:
+        report_lang = _resolve_language(detect_language(txt_path), project_lang)
+
+    # ── Visual extraction: Gemini -> OCR fallback ─────────────────────────────
+    visual_evidence = ""
+    visual_source   = "gemini"
+
+    try:
+        gemini_key      = get_gemini_key()
+        visual_evidence = extract_visual_evidence(frame_paths, gemini_key)
+        _ok(f"Gemini: {len(visual_evidence)} chars of visual evidence")
+
+    except GeminiUnavailableError as exc:
+        log.warning(f"Gemini unavailable — activating OCR fallback: {exc}")
+        _warn("Gemini unavailable — running local OCR fallback")
+        visual_evidence = _ocr_fallback(frame_paths)
+        visual_source   = "ocr_fallback"
+        if visual_evidence:
+            _ok(f"OCR fallback: {len(visual_evidence)} chars")
+        else:
+            _warn("OCR fallback produced no text — Claude will proceed without visual evidence")
+
+    # ── Report generation (Claude) ────────────────────────────────────────────
+    report_md = generate_report(
+        transcript_text = transcript_text,
+        visual_evidence = visual_evidence,
+        config          = config,
+        meeting_type    = config.get("meeting_type"),
+        report_language = report_lang,
+    )
+    _ok(f"Report generated: {len(report_md)} chars")
+
+    date_str    = date.today().strftime("%Y%m%d")
+    report_path = write_report(report_md, meeting_folder, date_str)
+    _ok(f"Report written: {report_path.name}")
+
+    log.info(
+        f"Automated pipeline complete — frames={n_frames}, "
+        f"source={visual_source}, report={report_path.name}"
+    )
+
+    return AnalysisResult(
+        workflow               = "cowork",
+        meeting_folder         = meeting_folder,
+        frames_dir             = frames_dir,
+        n_frames               = n_frames,
+        transcript_txt         = txt_path,
+        report_language        = report_lang,
+        prompt_chat1           = "",
+        provider               = "claude",
+        cowork_mode            = True,
+        report_path            = report_path,
+        visual_evidence_source = visual_source,
+    )
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_meeting(
@@ -358,6 +485,7 @@ def run_meeting(
     single_pass: bool,
     max_frames_override: int | None,
     manual_transcript: Path | None = None,
+    automated_pipeline: bool = False,
 ) -> AnalysisResult:
 
     logging.basicConfig(
@@ -405,6 +533,10 @@ def run_meeting(
             two_pass = True
 
     if not web_mode:
+        if automated_pipeline:
+            return _run_cowork_automated(
+                meeting_folder, video_path, transcript_path, config, max_frames_override
+            )
         return _run_cowork(meeting_folder, video_path, transcript_path, config, max_frames_override)
     elif two_pass and not single_pass:
         return _run_web_two_pass(meeting_folder, video_path, transcript_path, config, max_frames_override)
