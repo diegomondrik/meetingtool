@@ -1,15 +1,14 @@
 """
-gui/main_window.py — MeetingTool v2.0
-=======================================
-Main hub window. Shows existing projects, allows running analysis,
-and accessing all MeetingTool functions.
+gui/main_window.py - MeetingTool v2.5
+Main hub window. Sidebar + main panel layout. CustomTkinter dark mode.
 """
 
 import threading
+import time
 from pathlib import Path
 from datetime import date
-import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
+import customtkinter as ctk
+from tkinter import messagebox, filedialog
 
 from gui.styles import BaseWindow, COLORS, FONTS, PAD
 
@@ -17,163 +16,158 @@ from gui.styles import BaseWindow, COLORS, FONTS, PAD
 class MainWindow(BaseWindow):
 
     def __init__(self, parent, config: dict):
-        super().__init__(parent, "Home", width=720, height=560)
+        super().__init__(parent, "Home", width=960, height=620)
         self.resizable(True, True)
-        self.minsize(640, 480)
+        self.minsize(760, 500)
         self.config = config
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._analysis_running = False
+        self._analysis_start = 0.0
+        self._projects_data = []
+        self._project_buttons = []
+        self._selected_project_idx = None
         self._build()
         self._load_projects()
 
+    # ── Layout ────────────────────────────────────────────────────────────────
+
     def _build(self):
-        # ── Header ──
-        self._header(
-            self, "MeetingTool",
-            f"Provider: {self.config.get('llm_provider','').title()}  ·  "
-            f"Language: {self.config.get('default_language','').title()}"
+        self.columnconfigure(0, weight=0)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self._build_sidebar()
+        self._build_main_panel()
+
+    def _build_sidebar(self):
+        sb = ctk.CTkFrame(self, fg_color=COLORS["bg_sidebar"], corner_radius=0, width=210)
+        sb.grid(row=0, column=0, sticky="nsew")
+        sb.grid_propagate(False)
+        sb.columnconfigure(0, weight=1)
+        sb.rowconfigure(3, weight=1)
+
+        # App name
+        ctk.CTkLabel(
+            sb, text="MeetingTool",
+            font=ctk.CTkFont("Segoe UI", 15, "bold"),
+            text_color=COLORS["accent"], fg_color="transparent", anchor="w",
+        ).grid(row=0, column=0, padx=14, pady=(16, 0), sticky="ew")
+
+        ctk.CTkLabel(
+            sb,
+            text=f"{self.config.get('llm_provider','').title()} | {self.config.get('default_language','').title()}",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent", anchor="w",
+        ).grid(row=1, column=0, padx=14, pady=(2, 8), sticky="ew")
+
+        ctk.CTkLabel(
+            sb, text="Projects",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent", anchor="w",
+        ).grid(row=2, column=0, padx=14, pady=(4, 2), sticky="ew")
+
+        self._project_list_frame = ctk.CTkScrollableFrame(
+            sb, fg_color=COLORS["bg_sidebar"], corner_radius=0,
         )
+        self._project_list_frame.grid(row=3, column=0, sticky="nsew")
+        self._project_list_frame.columnconfigure(0, weight=1)
 
-        # ── Toolbar ──
-        toolbar = tk.Frame(self, bg=COLORS["bg"], padx=PAD["window"], pady=10)
-        toolbar.pack(fill="x")
+        # Sidebar footer
+        footer = ctk.CTkFrame(sb, fg_color=COLORS["bg_sidebar"], corner_radius=0)
+        footer.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
+        footer.columnconfigure(0, weight=1)
 
-        self._primary_button(
-            toolbar, "+ New Project", self._new_project, width=14
-        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            footer, text="+ New Project", command=self._new_project,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            text_color="#000000", corner_radius=6, height=32,
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
-        self._secondary_button(
-            toolbar, "⚙ Settings", self._open_settings, width=10
-        ).pack(side="left")
+        ctk.CTkButton(
+            footer, text="Settings", command=self._open_settings,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+            text_color=COLORS["text"], border_color=COLORS["border"],
+            border_width=1, corner_radius=6, height=32,
+        ).grid(row=1, column=0, sticky="ew")
 
-        tk.Label(
-            toolbar,
-            text="Select a project and meeting folder, then click Analyze.",
-            font=FONTS["small"], fg=COLORS["text_muted"], bg=COLORS["bg"]
-        ).pack(side="right")
+    def _build_main_panel(self):
+        main = ctk.CTkFrame(self, fg_color=COLORS["bg"], corner_radius=0)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(3, weight=1)
 
-        self._divider(self)
+        self._build_picker(main)
+        self._build_mode_selector(main)
+        self._build_button_row(main)
+        self._build_status_area(main)
 
-        # ── Main content: left panel (projects) + right panel (meeting) ──
-        content = tk.Frame(self, bg=COLORS["bg"])
-        content.pack(fill="both", expand=True, padx=PAD["window"], pady=(0, PAD["window"]))
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(0, weight=1)
+    def _build_picker(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color=COLORS["bg_card"], corner_radius=0)
+        frame.grid(row=0, column=0, sticky="ew")
 
-        # Left: project list
-        left = tk.Frame(content, bg=COLORS["bg"])
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        ctk.CTkLabel(
+            frame, text="Meeting folder",
+            font=ctk.CTkFont(*FONTS["heading"]),
+            text_color=COLORS["text"], fg_color="transparent", anchor="w",
+        ).pack(anchor="w", padx=PAD["window"], pady=(PAD["item"], 2))
 
-        tk.Label(
-            left, text="Your projects",
-            font=FONTS["heading"], fg=COLORS["text"], bg=COLORS["bg"]
-        ).pack(anchor="w", pady=(0, 4))
+        row = ctk.CTkFrame(frame, fg_color="transparent")
+        row.pack(fill="x", padx=PAD["window"], pady=(0, PAD["small"]))
+        row.columnconfigure(0, weight=1)
 
-        list_frame = tk.Frame(left, bg=COLORS["bg"])
-        list_frame.pack(fill="both", expand=True)
-
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side="right", fill="y")
-
-        self._project_list = tk.Listbox(
-            list_frame,
-            font=FONTS["body"],
-            bg=COLORS["bg_card"], fg=COLORS["text"],
-            selectbackground=COLORS["accent"],
-            selectforeground="#FFFFFF",
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            width=28,
-            yscrollcommand=scrollbar.set,
-            cursor="hand2"
-        )
-        self._project_list.pack(fill="both", expand=True)
-        scrollbar.config(command=self._project_list.yview)
-        self._project_list.bind("<<ListboxSelect>>", self._on_project_select)
-
-        # Right: meeting selection + analyze + status
-        right = tk.Frame(content, bg=COLORS["bg"])
-        right.grid(row=0, column=1, sticky="nsew")
-
-        tk.Label(
-            right, text="Meeting to analyze",
-            font=FONTS["heading"], fg=COLORS["text"], bg=COLORS["bg"]
-        ).pack(anchor="w", pady=(0, 4))
-
-        # Meeting folder picker
-        folder_frame = tk.Frame(right, bg=COLORS["bg"])
-        folder_frame.pack(fill="x", pady=(0, 8))
-
-        self._var_meeting = tk.StringVar()
+        self._var_meeting = ctk.StringVar()
         self._var_meeting.trace_add("write", self._on_folder_change)
-        meeting_entry = tk.Entry(
-            folder_frame, textvariable=self._var_meeting,
-            font=FONTS["body"],
-            bg=COLORS["bg_input"], fg=COLORS["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            highlightcolor=COLORS["accent"],
+        ctk.CTkEntry(
+            row, textvariable=self._var_meeting,
+            font=ctk.CTkFont(*FONTS["body"]),
+            fg_color=COLORS["bg_input"], border_color=COLORS["border"],
+            text_color=COLORS["text"],
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        ctk.CTkButton(
+            row, text="Browse...", command=self._browse_meeting,
+            font=ctk.CTkFont(*FONTS["small"]),
+            fg_color=COLORS["border"], hover_color=COLORS["bg_card"],
+            text_color=COLORS["text"], width=80, height=32, corner_radius=4,
+        ).grid(row=0, column=1)
+
+        self._lbl_video = ctk.CTkLabel(
+            frame, text="",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent", anchor="w",
         )
-        meeting_entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 4))
+        self._lbl_video.pack(anchor="w", padx=PAD["window"])
 
-        tk.Button(
-            folder_frame, text="Browse…",
-            font=FONTS["small"],
-            bg=COLORS["border"], fg=COLORS["text"],
-            relief="flat", cursor="hand2",
-            padx=8, pady=4,
-            command=self._browse_meeting
-        ).pack(side="left")
-
-        # ── File detection panel ──
-        self._detect_frame = tk.Frame(right, bg=COLORS["bg"])
-        self._detect_frame.pack(fill="x", pady=(0, 6))
-
-        # Video detection label
-        self._lbl_video = tk.Label(
-            self._detect_frame, text="",
-            font=FONTS["small"], fg=COLORS["text_muted"],
-            bg=COLORS["bg"], anchor="w"
+        self._lbl_transcript = ctk.CTkLabel(
+            frame, text="",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent", anchor="w",
         )
-        self._lbl_video.pack(anchor="w")
+        self._lbl_transcript.pack(anchor="w", padx=PAD["window"], pady=(0, 2))
 
-        # Transcript detection label + optional manual picker
-        self._lbl_transcript = tk.Label(
-            self._detect_frame, text="",
-            font=FONTS["small"], fg=COLORS["text_muted"],
-            bg=COLORS["bg"], anchor="w"
-        )
-        self._lbl_transcript.pack(anchor="w")
+        # Manual transcript picker (hidden by default)
+        self._transcript_manual_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        tr_row = ctk.CTkFrame(self._transcript_manual_frame, fg_color="transparent")
+        tr_row.pack(fill="x", padx=PAD["window"], pady=(2, PAD["small"]))
+        tr_row.columnconfigure(0, weight=1)
+        self._var_transcript = ctk.StringVar()
+        ctk.CTkEntry(
+            tr_row, textvariable=self._var_transcript,
+            font=ctk.CTkFont(*FONTS["small"]),
+            fg_color=COLORS["bg_input"], border_color=COLORS["warning"],
+            text_color=COLORS["text"],
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkButton(
+            tr_row, text="Browse...", command=self._browse_transcript,
+            font=ctk.CTkFont(*FONTS["small"]),
+            fg_color=COLORS["border"], hover_color=COLORS["bg_card"],
+            text_color=COLORS["text"], width=80, height=28, corner_radius=4,
+        ).grid(row=0, column=1)
 
-        # Manual transcript picker — shown only when auto-detect fails
-        self._transcript_manual_frame = tk.Frame(self._detect_frame, bg=COLORS["bg"])
-        self._var_transcript = tk.StringVar()
-        transcript_entry = tk.Entry(
-            self._transcript_manual_frame,
-            textvariable=self._var_transcript,
-            font=FONTS["small"],
-            bg=COLORS["bg_input"], fg=COLORS["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=COLORS["warning"],
-            highlightcolor=COLORS["accent"],
-        )
-        transcript_entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 4))
-        tk.Button(
-            self._transcript_manual_frame, text="Browse…",
-            font=FONTS["small"],
-            bg=COLORS["border"], fg=COLORS["text"],
-            relief="flat", cursor="hand2",
-            padx=6, pady=3,
-            command=self._browse_transcript
-        ).pack(side="left")
-        # Hidden by default — shown only when transcript not found
-        self._transcript_manual_frame.pack_forget()
-
-        # Mode selector
-        mode_frame = tk.Frame(right, bg=COLORS["bg"])
-        mode_frame.pack(fill="x", pady=(0, 8))
+    def _build_mode_selector(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color=COLORS["bg_card"], corner_radius=0)
+        frame.grid(row=1, column=0, sticky="ew", pady=(1, 0))
 
         cowork_mode = self.config.get("cowork_mode", False)
         provider    = self.config.get("llm_provider", "claude")
@@ -183,107 +177,139 @@ class MainWindow(BaseWindow):
             default_mode = "cowork"
         else:
             modes = [
-                ("web",      "Web browser — standard  (meetings under 45 min)"),
-                ("two_pass", "Web browser — two-pass  (meetings 45 min or longer)"),
+                ("web",      "Web — standard  (under 45 min)"),
+                ("two_pass", "Web — two-pass  (45 min or longer)"),
             ]
             default_mode = "web"
 
-        tk.Label(
-            mode_frame, text="Workflow:",
-            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"]
-        ).pack(anchor="w", pady=(0, 4))
+        inner = ctk.CTkFrame(frame, fg_color="transparent")
+        inner.pack(fill="x", padx=PAD["window"], pady=PAD["small"])
 
-        self._var_mode = tk.StringVar(value=default_mode)
+        ctk.CTkLabel(
+            inner, text="Workflow:",
+            font=ctk.CTkFont(*FONTS["body"]),
+            text_color=COLORS["text"], fg_color="transparent",
+        ).pack(side="left", padx=(0, 12))
+
+        self._var_mode = ctk.StringVar(value=default_mode)
         for value, label in modes:
-            tk.Radiobutton(
-                mode_frame, text=label, variable=self._var_mode, value=value,
-                font=FONTS["body"],
-                bg=COLORS["bg"], fg=COLORS["text"],
-                activebackground=COLORS["bg"],
-                selectcolor=COLORS["accent_light"],
-                relief="flat", cursor="hand2",
-            ).pack(anchor="w", pady=2)
+            ctk.CTkRadioButton(
+                inner, text=label, variable=self._var_mode, value=value,
+                font=ctk.CTkFont(*FONTS["body"]),
+                text_color=COLORS["text"],
+                fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+                border_color=COLORS["border"],
+            ).pack(side="left", padx=(0, 16))
 
-        # Action buttons row
-        btn_row = tk.Frame(right, bg=COLORS["bg"])
-        btn_row.pack(fill="x", pady=(8, 12))
+    def _build_button_row(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=0)
+        frame.grid(row=2, column=0, sticky="ew", padx=PAD["window"], pady=PAD["item"])
 
-        self._btn_analyze = self._primary_button(
-            btn_row, "▶  Analyze", self._run_analysis, width=12
+        self._btn_analyze = ctk.CTkButton(
+            frame, text="Analyze", command=self._run_analysis,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            text_color="#000000", corner_radius=6, width=100, height=34,
         )
-        self._btn_analyze.pack(side="left", padx=(0, 8))
+        self._btn_analyze.pack(side="left", padx=(0, 6))
 
-        self._btn_next_steps = self._secondary_button(
-            btn_row, "Next Steps →", self._open_next_steps, width=12
+        self._btn_next_steps = ctk.CTkButton(
+            frame, text="Next Steps", command=self._open_next_steps,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+            text_color=COLORS["text"], border_color=COLORS["border"],
+            border_width=1, corner_radius=6, width=100, height=34,
         )
-        self._btn_next_steps.pack(side="left", padx=(0, 8))
+        self._btn_next_steps.pack(side="left", padx=(0, 6))
 
-        self._btn_open_report = self._secondary_button(
-            btn_row, "Open report.md", self._open_report, width=13
+        self._btn_open_report = ctk.CTkButton(
+            frame, text="Open report", command=self._open_report,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+            text_color=COLORS["text"], border_color=COLORS["border"],
+            border_width=1, corner_radius=6, width=100, height=34,
         )
-        self._btn_open_report.pack(side="left", padx=(0, 8))
+        self._btn_open_report.pack(side="left", padx=(0, 6))
 
-        self._btn_export = self._secondary_button(
-            btn_row, "Export to DOCX", self._export_docx, width=13
+        self._btn_export = ctk.CTkButton(
+            frame, text="Export DOCX", command=self._export_docx,
+            font=ctk.CTkFont(*FONTS["button"]),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+            text_color=COLORS["text"], border_color=COLORS["border"],
+            border_width=1, corner_radius=6, width=110, height=34,
         )
         self._btn_export.pack(side="left")
 
-        # Status area
-        status_header = tk.Frame(right, bg=COLORS["bg"])
-        status_header.pack(fill="x", pady=(0, 4))
+    def _build_status_area(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color=COLORS["bg"], corner_radius=0)
+        frame.grid(row=3, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(3, weight=1)
 
-        tk.Label(
-            status_header, text="Status",
-            font=FONTS["heading"], fg=COLORS["text"], bg=COLORS["bg"]
+        # Status header row
+        top = ctk.CTkFrame(frame, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=PAD["window"], pady=(PAD["small"], 2))
+
+        ctk.CTkLabel(
+            top, text="Status",
+            font=ctk.CTkFont(*FONTS["heading"]),
+            text_color=COLORS["text"], fg_color="transparent",
         ).pack(side="left")
 
-        self._lbl_timer = tk.Label(
-            status_header, text="",
-            font=FONTS["small"], fg=COLORS["text_muted"], bg=COLORS["bg"]
+        self._lbl_timer = ctk.CTkLabel(
+            top, text="",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent",
         )
         self._lbl_timer.pack(side="right")
 
-        # Progress bar — hidden until analysis starts
-        self._progress = ttk.Progressbar(
-            right, mode="indeterminate", length=200
+        # Pipeline message label
+        self._lbl_progress_msg = ctk.CTkLabel(
+            frame, text="",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["accent"], fg_color="transparent", anchor="w",
         )
-        self._progress.pack(fill="x", pady=(0, 6))
-        self._progress.pack_forget()
+        self._lbl_progress_msg.grid(row=1, column=0, padx=PAD["window"], sticky="w")
 
-        status_frame = tk.Frame(
-            right, bg=COLORS["bg_card"],
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
+        # Progress bar (hidden until analysis)
+        self._progress = ctk.CTkProgressBar(
+            frame,
+            fg_color=COLORS["bg_card"],
+            progress_color=COLORS["accent"],
+            mode="indeterminate",
+            height=6,
         )
-        status_frame.pack(fill="both", expand=True)
+        self._progress.grid(row=2, column=0, padx=PAD["window"], pady=(0, 2), sticky="ew")
+        self._progress.grid_remove()
 
-        self._status_text = tk.Text(
-            status_frame,
-            font=FONTS["body"],
-            bg=COLORS["bg_card"], fg=COLORS["text"],
-            relief="flat",
-            state="disabled",
-            wrap="word",
-            padx=10, pady=8,
-            cursor="arrow",
+        # Log console — always visible
+        self._log = ctk.CTkTextbox(
+            frame,
+            font=ctk.CTkFont(*FONTS["mono"]),
+            fg_color=COLORS["bg_sidebar"], text_color="#D4D4D4",
+            wrap="word", corner_radius=0,
         )
-        status_scroll = tk.Scrollbar(status_frame, command=self._status_text.yview)
-        self._status_text.configure(yscrollcommand=status_scroll.set)
-        status_scroll.pack(side="right", fill="y")
-        self._status_text.pack(fill="both", expand=True)
+        self._log.grid(row=3, column=0, sticky="nsew")
+        self._log.configure(state="disabled")
+
+    # ── Project list ──────────────────────────────────────────────────────────
 
     def _load_projects(self):
-        """Populate the project list from the projects folder."""
         import json
-        self._project_list.delete(0, "end")
-        self._projects_data = []
+        for w in self._project_buttons:
+            w.destroy()
+        self._project_buttons.clear()
+        self._projects_data.clear()
+        self._selected_project_idx = None
 
-        mip_root = Path(self.config.get("mip_root", ""))
+        mip_root      = Path(self.config.get("mip_root", ""))
         projects_root = mip_root / "projects"
 
         if not projects_root.exists():
+            self._project_no_results()
             return
 
+        row_idx = 0
         for client_dir in sorted(projects_root.iterdir()):
             if not client_dir.is_dir():
                 continue
@@ -291,135 +317,158 @@ class MainWindow(BaseWindow):
                 if not project_dir.is_dir():
                     continue
                 cfg_path = project_dir / "mip.config.json"
-                if cfg_path.exists():
-                    try:
-                        with open(cfg_path) as f:
-                            cfg = json.load(f)
-                        label = f"{cfg.get('client','')} — {cfg.get('project','')}"
-                        self._project_list.insert("end", label)
-                        self._projects_data.append(cfg)
-                    except Exception:
-                        pass
+                if not cfg_path.exists():
+                    continue
+                try:
+                    with open(cfg_path) as f:
+                        cfg = json.load(f)
+                    label = f"{cfg.get('client','')} - {cfg.get('project','')}"
+                    idx = len(self._projects_data)
+                    btn = ctk.CTkButton(
+                        self._project_list_frame, text=label,
+                        font=ctk.CTkFont(*FONTS["small"]),
+                        fg_color="transparent", hover_color=COLORS["bg_card"],
+                        text_color=COLORS["text"], anchor="w",
+                        corner_radius=4, height=28,
+                        command=lambda i=idx: self._on_project_select(i),
+                    )
+                    btn.grid(row=row_idx, column=0, padx=4, pady=1, sticky="ew")
+                    self._project_buttons.append(btn)
+                    self._projects_data.append(cfg)
+                    row_idx += 1
+                except Exception:
+                    pass
 
         if not self._projects_data:
-            self._project_list.insert("end", "(no projects yet)")
+            self._project_no_results()
 
-    def _on_project_select(self, event):
-        """Auto-populate meeting folder when a project is selected."""
-        selection = self._project_list.curselection()
-        if not selection or not self._projects_data:
-            return
-        idx = selection[0]
-        if idx >= len(self._projects_data):
-            return
-        project_cfg = self._projects_data[idx]
-        project_folder = Path(project_cfg.get("project_folder", ""))
-        self._var_meeting.set(str(project_folder / f"MeetingName_{date.today().strftime('%Y%m%d')}"))
+    def _project_no_results(self):
+        lbl = ctk.CTkLabel(
+            self._project_list_frame, text="No projects yet",
+            font=ctk.CTkFont(*FONTS["small"]),
+            text_color=COLORS["text_muted"], fg_color="transparent", anchor="w",
+        )
+        lbl.grid(row=0, column=0, padx=10, pady=4, sticky="w")
+        self._project_buttons.append(lbl)
+
+    def _on_project_select(self, idx: int):
+        for i, btn in enumerate(self._project_buttons):
+            if isinstance(btn, ctk.CTkButton):
+                if i == idx:
+                    btn.configure(fg_color=COLORS["accent"], text_color="#000000")
+                else:
+                    btn.configure(fg_color="transparent", text_color=COLORS["text"])
+        self._selected_project_idx = idx
+        cfg = self._projects_data[idx]
+        folder = Path(cfg.get("project_folder", ""))
+        self._var_meeting.set(str(folder / f"MeetingName_{date.today().strftime('%Y%m%d')}"))
+
+    # ── Folder detection ──────────────────────────────────────────────────────
 
     def _on_folder_change(self, *args):
-        """Detect video and transcript when folder path changes."""
         folder_str = self._var_meeting.get().strip()
-        if not folder_str:
-            self._lbl_video.configure(text="")
-            self._lbl_transcript.configure(text="")
-            self._transcript_manual_frame.pack_forget()
-            return
-
-        folder = Path(folder_str)
-        if not folder.exists():
+        if not folder_str or not Path(folder_str).exists():
             self._lbl_video.configure(text="")
             self._lbl_transcript.configure(text="")
             self._transcript_manual_frame.pack_forget()
             return
 
         from tools.extract_frames import find_video_and_transcript
-        video, transcript = find_video_and_transcript(folder)
+        video, transcript = find_video_and_transcript(Path(folder_str))
 
         if video:
             self._lbl_video.configure(
-                text=f"  ✓  Video: {video.name}",
-                fg=COLORS["success"]
+                text=f"  Video: {video.name}", text_color=COLORS["success"]
             )
         else:
             self._lbl_video.configure(
-                text="  ✗  No .mp4 found in this folder",
-                fg=COLORS["error"]
+                text="  No .mp4 found", text_color=COLORS["error"]
             )
 
         if transcript:
             self._lbl_transcript.configure(
-                text=f"  ✓  Transcript: {transcript.name}",
-                fg=COLORS["success"]
+                text=f"  Transcript: {transcript.name}", text_color=COLORS["success"]
             )
             self._transcript_manual_frame.pack_forget()
             self._var_transcript.set("")
         else:
             self._lbl_transcript.configure(
-                text="  ⚠  Transcript not found automatically — select it manually:",
-                fg=COLORS["warning"]
+                text="  Transcript not found - select manually:",
+                text_color=COLORS["warning"]
             )
-            self._transcript_manual_frame.pack(fill="x", pady=(4, 0))
-
-    def _browse_transcript(self):
-        """Browse for a transcript DOCX file manually."""
-        folder_str = self._var_meeting.get().strip()
-        initial = folder_str if folder_str else str(Path.home())
-        path = filedialog.askopenfilename(
-            title="Select transcript file",
-            initialdir=initial,
-            filetypes=[("Word documents", "*.docx"), ("All files", "*.*")]
-        )
-        if path:
-            self._var_transcript.set(path)
-            self._lbl_transcript.configure(
-                text=f"  ✓  Transcript: {Path(path).name}  (manual)",
-                fg=COLORS["success"]
-            )
+            self._transcript_manual_frame.pack(fill="x")
 
     def _browse_meeting(self):
-        mip_root = self.config.get("mip_root", str(Path.home()))
         path = filedialog.askdirectory(
             title="Select meeting folder",
-            initialdir=mip_root
+            initialdir=self.config.get("mip_root", str(Path.home()))
         )
         if path:
             self._var_meeting.set(path)
 
+    def _browse_transcript(self):
+        initial = self._var_meeting.get().strip() or str(Path.home())
+        path = filedialog.askopenfilename(
+            title="Select transcript file", initialdir=initial,
+            filetypes=[("Word documents", "*.docx"), ("All files", "*.*")],
+        )
+        if path:
+            self._var_transcript.set(path)
+            self._lbl_transcript.configure(
+                text=f"  Transcript: {Path(path).name}  (manual)",
+                text_color=COLORS["success"]
+            )
+
+    # ── Progress helpers ──────────────────────────────────────────────────────
+
     def _start_progress(self):
-        """Start progress bar and elapsed timer."""
-        import time
         self._analysis_start = time.time()
-        self._progress.pack(fill="x", pady=(0, 6), before=self._status_text.master)
-        self._progress.start(12)
+        self._progress.grid()
+        self._progress.start()
         self._tick_timer()
 
     def _tick_timer(self):
-        """Update elapsed time label every second while analysis runs."""
-        import time
-        if not getattr(self, "_analysis_running", False):
+        if not self._analysis_running:
             return
         elapsed = int(time.time() - self._analysis_start)
         mins, secs = divmod(elapsed, 60)
-        self._lbl_timer.configure(
-            text=f"Elapsed: {mins}:{secs:02d}",
-            fg=COLORS["text_muted"]
-        )
+        self._lbl_timer.configure(text=f"Elapsed: {mins}:{secs:02d}")
         self.after(1000, self._tick_timer)
 
     def _stop_progress(self, success: bool = True):
-        """Stop progress bar and timer, show final elapsed time."""
-        import time
         self._analysis_running = False
         self._progress.stop()
-        self._progress.pack_forget()
-        if hasattr(self, "_analysis_start"):
+        self._progress.grid_remove()
+        self._lbl_progress_msg.configure(text="")
+        if self._analysis_start:
             elapsed = int(time.time() - self._analysis_start)
             mins, secs = divmod(elapsed, 60)
-            color = COLORS["success"] if success else COLORS["error"]
             self._lbl_timer.configure(
                 text=f"Finished in {mins}:{secs:02d}",
-                fg=color
+                text_color=COLORS["success"] if success else COLORS["error"],
             )
+
+    # ── Log console helpers ───────────────────────────────────────────────────
+
+    def _append_status(self, msg: str, color: str = None):
+        color_map = {"ok": "#4ADE80", "warn": "#FBBF24", "err": "#F87171"}
+        self._log.configure(state="normal")
+        if color and color in color_map:
+            tag = f"_clr_{color}"
+            self._log._textbox.tag_configure(tag, foreground=color_map[color])
+            self._log._textbox.insert("end", msg + "\n", tag)
+        else:
+            self._log._textbox.insert("end", msg + "\n")
+        self._log._textbox.see("end")
+        self._log.configure(state="disabled")
+        self._log.update()
+
+    def _clear_log(self):
+        self._log.configure(state="normal")
+        self._log.delete("0.0", "end")
+        self._log.configure(state="disabled")
+
+    # ── Analyze (web / two-pass / cowork) ────────────────────────────────────
 
     def _run_analysis(self):
         meeting_folder = self._var_meeting.get().strip()
@@ -429,93 +478,56 @@ class MainWindow(BaseWindow):
 
         meeting_path = Path(meeting_folder)
         if not meeting_path.exists():
-            answer = messagebox.askyesno(
-                "Folder not found",
-                f"The folder doesn't exist yet:\n{meeting_folder}\n\n"
-                "Create it now?"
-            )
-            if answer:
+            if messagebox.askyesno("Folder not found", f"Create folder?\n{meeting_folder}"):
                 meeting_path.mkdir(parents=True, exist_ok=True)
             else:
                 return
 
-        # Clear previous status
-        self._status_text.configure(state="normal")
-        self._status_text.delete("1.0", "end")
-        self._status_text.configure(state="disabled")
+        self._clear_log()
         self._lbl_timer.configure(text="")
-
-        self._btn_analyze.configure(state="disabled", text="Analyzing…")
+        self._btn_analyze.configure(state="disabled", text="Analyzing...")
         self._analysis_running = True
         self._start_progress()
         self._append_status(f"Starting analysis: {meeting_path.name}")
 
-        # Pass manual transcript override if set
         manual_transcript = self._var_transcript.get().strip() or None
-
         mode = self._var_mode.get()
-        thread = threading.Thread(
+        threading.Thread(
             target=self._do_analysis,
             args=(meeting_path, mode, manual_transcript),
-            daemon=True
-        )
-        thread.start()
-
-    def _append_status(self, msg: str, color: str = None):
-        """Append a line to the status text area."""
-        self._status_text.configure(state="normal")
-        colors_map = {
-            "ok":   COLORS["success"],
-            "warn": COLORS["warning"],
-            "err":  COLORS["error"],
-        }
-        if color and color in colors_map:
-            tag = f"tag_{color}"
-            self._status_text.tag_configure(tag, foreground=colors_map[color])
-            self._status_text.insert("end", msg + "\n", tag)
-        else:
-            self._status_text.insert("end", msg + "\n")
-        self._status_text.see("end")
-        self._status_text.configure(state="disabled")
-        self._status_text.update()
+            daemon=True,
+        ).start()
 
     def _do_analysis(self, meeting_path: Path, mode: str, manual_transcript: str = None):
         import logging
 
         class GUIHandler(logging.Handler):
-            def __init__(self, window):
+            def __init__(self, win):
                 super().__init__()
-                self.window = window
+                self.win = win
             def emit(self, record):
-                msg = self.format(record)
+                msg   = self.format(record)
                 color = "ok" if record.levelno == logging.INFO else "warn"
-                self.window.after(0, lambda m=msg, c=color: self.window._append_status(m, c))
+                self.win.after(0, lambda m=msg, c=color: self.win._append_status(m, c))
 
-        logger = logging.getLogger()
+        logger  = logging.getLogger()
         handler = GUIHandler(self)
         handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
-
         try:
             from tools.runner import run_meeting
-
-            web_mode = mode in ("web", "two_pass")
-            two_pass = mode == "two_pass"
-
             result = run_meeting(
                 meeting_folder      = meeting_path,
-                web_mode            = web_mode,
-                two_pass            = two_pass,
+                web_mode            = mode in ("web", "two_pass"),
+                two_pass            = mode == "two_pass",
                 single_pass         = False,
                 max_frames_override = None,
                 manual_transcript   = Path(manual_transcript) if manual_transcript else None,
             )
-
             self.after(0, lambda: self._analysis_done(result))
-
         except SystemExit:
-            self.after(0, lambda: self._analysis_error("Analysis stopped — check the output above."))
+            self.after(0, lambda: self._analysis_error("Analysis stopped."))
         except Exception as e:
             msg = str(e)
             self.after(0, lambda: self._analysis_error(msg))
@@ -524,22 +536,20 @@ class MainWindow(BaseWindow):
 
     def _analysis_done(self, result):
         self._stop_progress(success=True)
-        self._btn_analyze.configure(state="normal", text="▶  Analyze")
-        self._append_status("")
-        self._append_status(f"  Extraction complete — {result.n_frames} frames ready", "ok")
-        self._append_status(f"  Opening next steps…")
-
-        # Show the next steps window
+        self._btn_analyze.configure(state="normal", text="Analyze")
+        self._append_status(f"  Extraction complete - {result.n_frames} frames ready", "ok")
+        self._append_status("  Opening next steps...")
         from gui.next_steps_window import NextStepsWindow
-        NextStepsWindow(self.master, result=result)
+        NextStepsWindow(self, result=result)
 
     def _analysis_error(self, msg: str):
         self._stop_progress(success=False)
-        self._btn_analyze.configure(state="normal", text="▶  Analyze")
+        self._btn_analyze.configure(state="normal", text="Analyze")
         self._append_status(f"  Error: {msg}", "err")
 
+    # ── Next Steps (from existing frames) ─────────────────────────────────────
+
     def _open_next_steps(self):
-        """Open NextStepsWindow — auto for Cowork, ask user confirmation for web."""
         meeting_folder = self._var_meeting.get().strip()
         if not meeting_folder:
             messagebox.showwarning("No folder", "Please select a meeting folder first.")
@@ -549,108 +559,72 @@ class MainWindow(BaseWindow):
         frames_dir      = meeting_path / "imagenes_reunion"
         existing_frames = sorted(frames_dir.glob("frame_*.jpg")) if frames_dir.exists() else []
 
-        # Determine current workflow
         from tools.runner import _merged_config
         config      = _merged_config(meeting_path)
-        cowork_mode = config.get("cowork_mode", False)
         provider    = config.get("llm_provider", "claude")
-        is_cowork   = (provider == "claude" and cowork_mode)
+        cowork_mode = config.get("cowork_mode", False)
+        is_cowork   = provider == "claude" and cowork_mode
 
         if not existing_frames:
-            # No frames anywhere — offer to run analysis
-            answer = messagebox.askyesno(
-                "No frames found",
-                f"No extracted frames found in:\n{frames_dir}\n\n"
-                "Run Analyze first to extract frames from the recording?\n\n"
-                "Click Yes to run Analyze now, or No to cancel."
-            )
-            if answer:
+            if messagebox.askyesno("No frames found", "Run Analyze first to extract frames?"):
                 self._run_analysis()
             return
 
         if is_cowork:
-            # Cowork — verify automatically, no need to ask
-            self._append_status(
-                f"  Found {len(existing_frames)} existing frames — opening next steps…"
-            )
+            self._append_status(f"  Using {len(existing_frames)} existing frames...")
             self._build_result_from_existing(meeting_path, existing_frames)
         else:
-            # Web — frames exist but user must confirm they are the right ones
             answer = messagebox.askyesno(
                 "Use existing frames?",
-                f"Found {len(existing_frames)} frames already extracted in:\n"
-                f"{frames_dir}\n\n"
-                f"Do you want to use these frames for the next steps?\n\n"
-                f"Click Yes to continue, or No to run Analyze again."
+                f"Found {len(existing_frames)} frames in:\n{frames_dir}\n\nUse them?"
             )
             if answer:
-                self._append_status(
-                    f"  Using {len(existing_frames)} existing frames — opening next steps…"
-                )
                 self._build_result_from_existing(meeting_path, existing_frames)
             else:
                 self._run_analysis()
 
     def _build_result_from_existing(self, meeting_path: Path, existing_frames: list):
-        """Build an AnalysisResult from already-extracted files and open NextStepsWindow."""
         from tools.runner import AnalysisResult, _merged_config
-        from tools.extract_frames import find_video_and_transcript
-
         config      = _merged_config(meeting_path)
         provider    = config.get("llm_provider", "claude")
         cowork_mode = config.get("cowork_mode", False)
         report_lang = config.get("report_language", "english")
 
-        # Find transcript .txt if it exists
-        txt_files = list(meeting_path.glob("*.txt"))
+        txt_files      = list(meeting_path.glob("*.txt"))
         transcript_txt = txt_files[0] if txt_files else None
 
-        # Generate prompt
         from tools.prompt_generator import generate_meeting_prompt
-        prompt = generate_meeting_prompt(config, report_lang)
-
-        # Determine workflow from config
-        if provider == "claude" and cowork_mode:
-            workflow = "cowork"
-            frames_chat1 = existing_frames
-        else:
-            workflow = "web"
-            frames_chat1 = existing_frames
+        prompt   = generate_meeting_prompt(config, report_lang)
+        workflow = "cowork" if (provider == "claude" and cowork_mode) else "web"
 
         result = AnalysisResult(
-            workflow       = workflow,
-            meeting_folder = meeting_path,
-            frames_dir     = meeting_path / "imagenes_reunion",
-            n_frames       = len(existing_frames),
-            transcript_txt = transcript_txt,
-            report_language= report_lang,
-            prompt_chat1   = prompt,
-            frames_chat1   = frames_chat1,
-            provider       = provider,
-            cowork_mode    = cowork_mode,
+            workflow        = workflow,
+            meeting_folder  = meeting_path,
+            frames_dir      = meeting_path / "imagenes_reunion",
+            n_frames        = len(existing_frames),
+            transcript_txt  = transcript_txt,
+            report_language = report_lang,
+            prompt_chat1    = prompt,
+            frames_chat1    = existing_frames,
+            provider        = provider,
+            cowork_mode     = cowork_mode,
         )
-
         from gui.next_steps_window import NextStepsWindow
-        NextStepsWindow(self.master, result=result)
+        NextStepsWindow(self, result=result)
+
+    # ── Open report ───────────────────────────────────────────────────────────
 
     def _open_report(self):
-        """Open the most recent report.md in the system text editor."""
         import subprocess, platform
         meeting_folder = self._var_meeting.get().strip()
         if not meeting_folder:
             messagebox.showwarning("No folder", "Please select a meeting folder first.")
             return
-
         meeting_path = Path(meeting_folder)
         reports = sorted(meeting_path.glob("report_*.md"), reverse=True)
         if not reports:
-            messagebox.showinfo(
-                "No report found",
-                f"No report_*.md found in:\n{meeting_path}\n\n"
-                "Run Analyze first to generate the report."
-            )
+            messagebox.showinfo("No report", f"No report_*.md found in:\n{meeting_path}")
             return
-
         report = reports[0]
         system = platform.system()
         try:
@@ -664,70 +638,44 @@ class MainWindow(BaseWindow):
         except Exception as e:
             messagebox.showerror("Error", f"Could not open file:\n{e}")
 
+    # ── Export DOCX ───────────────────────────────────────────────────────────
+
     def _export_docx(self):
-        """Export a report.md to DOCX with embedded images."""
         meeting_folder = self._var_meeting.get().strip()
         if not meeting_folder:
             messagebox.showwarning("No folder", "Please select a meeting folder first.")
             return
-
         meeting_path = Path(meeting_folder)
         reports = sorted(meeting_path.glob("*.md"), reverse=True)
         if not reports:
-            messagebox.showinfo(
-                "No report found",
-                f"No .md files found in:\n{meeting_path}\n\n"
-                "Run Analyze first to generate the report."
-            )
+            messagebox.showinfo("No report", f"No .md files found in:\n{meeting_path}")
             return
 
-        # Let user pick if multiple .md files exist
+        report = reports[0]
         if len(reports) > 1:
-            report = MdFilePickerDialog(self, reports).result
+            report = _MdPickerDialog(self, reports).result
             if report is None:
-                return  # cancelled
-        else:
-            report = reports[0]
+                return
 
-        # Count image refs to inform the user
-        import re
-        text   = report.read_text(encoding="utf-8")
-        refs   = re.findall(r'\[frame_\d+_t\d{2}-\d{2}-\d{2}\.jpg\]', text)
-        n_refs = len(refs)
-
-        msg = f"Report: {report.name}\n"
-        if n_refs > 3:
-            msg += f"Contains {n_refs} image references — DOCX recommended.\n\n"
-        else:
-            msg += "\n"
-        msg += "Export format:"
-
-        choice = ExportFormatDialog(self, msg).result
+        choice = _ExportFormatDialog(self, report.name).result
         if choice is None:
-            return  # cancelled
+            return
 
-        # Start progress bar and disable button
-        self._btn_export.configure(state="disabled", text="Exporting…")
+        self._btn_export.configure(state="disabled", text="Exporting...")
         self._analysis_running = True
         self._start_progress()
-        self._append_status(f"  Exporting {report.name} → {choice.upper()}…")
+        self._append_status(f"  Exporting {report.name}...")
 
-        thread = threading.Thread(
+        threading.Thread(
             target=self._do_export,
             args=(meeting_path, choice, report),
-            daemon=True
-        )
-        thread.start()
+            daemon=True,
+        ).start()
 
     def _do_export(self, meeting_path: Path, output_format: str, report_path: Path):
         try:
             from tools.exporter import run_export
-            run_export(
-                meeting_folder=meeting_path,
-                output_format=output_format,
-                report_path=report_path,
-            )
-            # Find the DOCX that was just created
+            run_export(meeting_folder=meeting_path, output_format=output_format, report_path=report_path)
             docx_files = sorted(meeting_path.glob("*.docx"), reverse=True)
             docx_path  = docx_files[0] if docx_files else None
             self.after(0, lambda: self._export_done(docx_path, output_format, meeting_path, report_path))
@@ -735,61 +683,57 @@ class MainWindow(BaseWindow):
             msg = str(e)
             self.after(0, lambda: (
                 self._stop_progress(success=False),
-                self._btn_export.configure(state="normal", text="Export to DOCX"),
+                self._btn_export.configure(state="normal", text="Export DOCX"),
                 self._append_status(f"  Export error: {msg}", "err"),
             ))
 
-    def _export_done(self, docx_path: Path | None, output_format: str,
-                    meeting_path: Path, report_path: Path):
+    def _export_done(self, docx_path, output_format: str, meeting_path: Path, report_path: Path):
         self._stop_progress(success=True)
-        self._btn_export.configure(state="normal", text="Export to DOCX")
+        self._btn_export.configure(state="normal", text="Export DOCX")
         self._append_status("  Export complete!", "ok")
 
         if output_format in ("docx", "both") and docx_path:
             self._append_status(f"  DOCX saved: {docx_path}")
             import platform, subprocess
-            open_folder = messagebox.askyesno(
-                "Export complete",
-                f"DOCX saved:\n{docx_path}\n\nOpen the folder?"
-            )
-            if open_folder:
-                system = platform.system()
-                if system == "Windows":
+            if messagebox.askyesno("Export complete", f"DOCX saved:\n{docx_path}\n\nOpen the folder?"):
+                if platform.system() == "Windows":
                     subprocess.Popen(f'explorer /select,"{docx_path}"')
-                elif system == "Darwin":
+                elif platform.system() == "Darwin":
                     subprocess.Popen(["open", "-R", str(docx_path)])
                 else:
                     subprocess.Popen(["xdg-open", str(docx_path.parent)])
 
-        # Offer to rename imagenes_reunion → {mp4_stem}_{report_stem}
+        # Offer to rename frames folder
         frames_dir = meeting_path / "imagenes_reunion"
         if frames_dir.exists():
             mp4_files = list(meeting_path.glob("*.mp4"))
             if mp4_files:
                 new_name = f"{mp4_files[0].stem}_{report_path.stem}"
-                answer   = messagebox.askyesno(
-                    "Rename frames folder?",
-                    f"Do you want to rename the frames folder?\n\n"
-                    f"From:  imagenes_reunion\n"
-                    f"To:    {new_name}"
-                )
-                if answer:
+                if messagebox.askyesno("Rename frames folder?",
+                                       f"From:  imagenes_reunion\nTo:    {new_name}"):
                     try:
                         frames_dir.rename(meeting_path / new_name)
-                        self._append_status(f"  Folder renamed → {new_name}", "ok")
+                        self._append_status(f"  Renamed to: {new_name}", "ok")
                     except Exception as exc:
-                        self._append_status(f"  Could not rename folder: {exc}", "err")
+                        self._append_status(f"  Could not rename: {exc}", "err")
+
+    # ── Navigation ────────────────────────────────────────────────────────────
 
     def _new_project(self):
+        if hasattr(self, '_project_win') and self._project_win.winfo_exists():
+            self._project_win.lift()
+            self._project_win.focus_force()
+            return
         from gui.project_window import ProjectWindow
-        ProjectWindow(
-            self.master,
-            global_config=self.config,
-            on_complete=self._load_projects
-        )
+        self._project_win = ProjectWindow(self, global_config=self.config, on_complete=self._load_projects)
 
     def _open_settings(self):
-        SettingsWindow(self.master, config=self.config, on_save=self._reload_config)
+        if hasattr(self, '_settings_win') and self._settings_win.winfo_exists():
+            self._settings_win.lift()
+            self._settings_win.focus_force()
+            return
+        from gui.settings import SettingsWindow
+        self._settings_win = SettingsWindow(self, config=self.config, on_save=self._reload_config)
 
     def _reload_config(self):
         from tools.installer import _load_global_config
@@ -799,56 +743,47 @@ class MainWindow(BaseWindow):
         self.master.destroy()
 
 
-class ExportFormatDialog(tk.Toplevel):
-    """Simple dialog asking the user to choose export format."""
+# ── Helper dialogs ─────────────────────────────────────────────────────────────
 
-    def __init__(self, parent, message: str):
+class _ExportFormatDialog(ctk.CTkToplevel):
+    def __init__(self, parent, report_name: str):
         super().__init__(parent)
-        self.title("MeetingTool — Export format")
-        self.configure(bg=COLORS["bg"])
+        self.title("MeetingTool - Export format")
+        self.configure(fg_color=COLORS["bg"])
         self.resizable(False, False)
         self.result = None
         self.grab_set()
-
-        # Center
-        self.update_idletasks()
-        w, h = 380, 220
+        w, h = 360, 220
         x = (self.winfo_screenwidth()  - w) // 2
         y = (self.winfo_screenheight() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-        tk.Label(
-            self, text=message,
-            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"],
-            justify="left", wraplength=340, padx=20, pady=16
-        ).pack(anchor="w")
-
-        btn_frame = tk.Frame(self, bg=COLORS["bg"], padx=20, pady=8)
-        btn_frame.pack(fill="x")
+        ctk.CTkLabel(
+            self, text=f"Export format for:\n{report_name}",
+            font=ctk.CTkFont(*FONTS["body"]),
+            text_color=COLORS["text"], fg_color="transparent",
+            justify="left",
+        ).pack(anchor="w", padx=20, pady=16)
 
         for label, value in [
             ("DOCX  (recommended)", "docx"),
             ("Markdown only",       "md"),
-            ("Both",                "both"),
+            ("Both",               "both"),
         ]:
-            tk.Button(
-                btn_frame, text=label,
-                font=FONTS["body"],
-                bg=COLORS["bg_card"], fg=COLORS["text"],
-                relief="flat", cursor="hand2",
-                highlightthickness=1,
-                highlightbackground=COLORS["border"],
-                padx=12, pady=6, anchor="w",
-                command=lambda v=value: self._choose(v)
-            ).pack(fill="x", pady=2)
+            ctk.CTkButton(
+                self, text=label, command=lambda v=value: self._choose(v),
+                font=ctk.CTkFont(*FONTS["body"]),
+                fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+                text_color=COLORS["text"], border_color=COLORS["border"],
+                border_width=1, corner_radius=4, anchor="w",
+            ).pack(fill="x", padx=20, pady=2)
 
-        tk.Button(
-            btn_frame, text="Cancel",
-            font=FONTS["small"], fg=COLORS["text_muted"],
-            bg=COLORS["bg"], relief="flat", cursor="hand2",
-            command=self.destroy
+        ctk.CTkButton(
+            self, text="Cancel", command=self.destroy,
+            font=ctk.CTkFont(*FONTS["small"]),
+            fg_color="transparent", hover_color=COLORS["bg_card"],
+            text_color=COLORS["text_muted"],
         ).pack(pady=(8, 0))
-
         self.wait_window()
 
     def _choose(self, value: str):
@@ -856,182 +791,43 @@ class ExportFormatDialog(tk.Toplevel):
         self.destroy()
 
 
-class MdFilePickerDialog(tk.Toplevel):
-    """Dialog to choose which .md file to export when multiple exist."""
-
+class _MdPickerDialog(ctk.CTkToplevel):
     def __init__(self, parent, reports: list):
         super().__init__(parent)
-        self.title("MeetingTool — Select report")
-        self.configure(bg=COLORS["bg"])
+        self.title("MeetingTool - Select report")
+        self.configure(fg_color=COLORS["bg"])
         self.resizable(False, False)
         self.result = None
         self.grab_set()
-
-        btn_h = 44
-        h = min(140 + len(reports) * btn_h, 480)
+        h = min(160 + len(reports) * 46, 480)
         w = 440
         x = (self.winfo_screenwidth()  - w) // 2
         y = (self.winfo_screenheight() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-        tk.Label(
-            self,
-            text="Multiple .md files found.\nSelect the one to export:",
-            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["bg"],
-            justify="left", wraplength=380, padx=20, pady=16,
-        ).pack(anchor="w")
-
-        btn_frame = tk.Frame(self, bg=COLORS["bg"], padx=20, pady=4)
-        btn_frame.pack(fill="x")
+        ctk.CTkLabel(
+            self, text="Multiple .md files found.\nSelect the one to export:",
+            font=ctk.CTkFont(*FONTS["body"]),
+            text_color=COLORS["text"], fg_color="transparent", justify="left",
+        ).pack(anchor="w", padx=20, pady=16)
 
         for report in reports:
-            tk.Button(
-                btn_frame, text=report.name,
-                font=FONTS["body"],
-                bg=COLORS["bg_card"], fg=COLORS["text"],
-                relief="flat", cursor="hand2",
-                highlightthickness=1,
-                highlightbackground=COLORS["border"],
-                padx=12, pady=6, anchor="w",
-                command=lambda r=report: self._choose(r),
-            ).pack(fill="x", pady=2)
+            ctk.CTkButton(
+                self, text=report.name, command=lambda r=report: self._choose(r),
+                font=ctk.CTkFont(*FONTS["body"]),
+                fg_color=COLORS["bg_card"], hover_color=COLORS["border"],
+                text_color=COLORS["text"], border_color=COLORS["border"],
+                border_width=1, corner_radius=4, anchor="w",
+            ).pack(fill="x", padx=20, pady=2)
 
-        tk.Button(
-            btn_frame, text="Cancel",
-            font=FONTS["small"], fg=COLORS["text_muted"],
-            bg=COLORS["bg"], relief="flat", cursor="hand2",
-            command=self.destroy,
+        ctk.CTkButton(
+            self, text="Cancel", command=self.destroy,
+            font=ctk.CTkFont(*FONTS["small"]),
+            fg_color="transparent", hover_color=COLORS["bg_card"],
+            text_color=COLORS["text_muted"],
         ).pack(pady=(8, 0))
-
         self.wait_window()
 
     def _choose(self, report: Path):
         self.result = report
-        self.destroy()
-
-
-class SettingsWindow(BaseWindow):
-    """Simple settings window to update global config."""
-
-    def __init__(self, parent, config: dict, on_save=None):
-        super().__init__(parent, "Settings", width=540, height=500)
-        self.config = config
-        self.on_save = on_save
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self._build()
-
-    def _build(self):
-        self._header(self, "Settings", "Update your MeetingTool preferences.")
-
-        # ── Footer FIRST — anchors to bottom before canvas takes remaining space ──
-        footer = tk.Frame(self, bg=COLORS["bg"], pady=12)
-        footer.pack(fill="x", side="bottom")
-
-        self._secondary_button(footer, "Cancel", self.destroy).pack(
-            side="right", padx=8
-        )
-        self._primary_button(footer, "Save changes", self._save).pack(
-            side="right", padx=(PAD["window"], 0)
-        )
-
-        tk.Frame(self, bg=COLORS["border"], height=1).pack(
-            fill="x", side="bottom"
-        )
-
-        # ── Scrollable content AFTER footer (fills remaining space) ──
-        canvas = tk.Canvas(self, bg=COLORS["bg_card"], highlightthickness=0)
-        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        content = tk.Frame(canvas, bg=COLORS["bg_card"])
-        content.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        canvas.create_window((0, 0), window=content, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-
-        self._section_label(content, "Installation folder")
-        self._var_root = self._labeled_field(
-            content, "Projects and recordings folder",
-            self.config.get("mip_root", ""),
-            browse=True, browse_type="dir"
-        )
-
-        self._section_label(content, "Default AI provider")
-        self._var_provider = self._radio_group(
-            content, "",
-            [("claude", "Claude"), ("chatgpt", "ChatGPT"), ("gemini", "Gemini")],
-            default=self.config.get("llm_provider", "claude")
-        )
-        self._var_provider.trace_add("write", self._on_provider_change)
-
-        # Cowork sub-option — shown only when Claude is selected
-        self._cowork_frame = tk.Frame(
-            content, bg=COLORS["accent_light"],
-            padx=PAD["window"] + 16, pady=PAD["item"]
-        )
-        self._cowork_frame.pack(fill="x")
-
-        tk.Label(
-            self._cowork_frame,
-            text="How do you use Claude?",
-            font=FONTS["body"], fg=COLORS["text"], bg=COLORS["accent_light"],
-            anchor="w"
-        ).pack(anchor="w", pady=(0, 4))
-
-        self._var_cowork = self._radio_group(
-            self._cowork_frame, "",
-            [
-                ("cowork", "Claude Desktop with Cowork"),
-                ("web",    "Web browser (claude.ai)"),
-            ],
-            default="cowork" if self.config.get("cowork_mode", False) else "web"
-        )
-
-        if self.config.get("llm_provider", "claude") != "claude":
-            self._cowork_frame.pack_forget()
-
-        self._section_label(content, "Default report language")
-        self._var_language = self._radio_group(
-            content, "",
-            [("english", "English"), ("spanish", "Spanish")],
-            default=self.config.get("default_language", "english")
-        )
-
-    def _on_close(self):
-        """Ask user to save before closing if they press X."""
-        if messagebox.askyesno(
-            "Save changes?",
-            "Do you want to save your changes before closing?"
-        ):
-            self._save()
-        else:
-            self.destroy()
-
-    def _on_provider_change(self, *args):
-        if self._var_provider.get() == "claude":
-            self._cowork_frame.pack(fill="x")
-        else:
-            self._cowork_frame.pack_forget()
-
-    def _save(self):
-        from tools.installer import _write_global_config
-        provider = self._var_provider.get()
-        cowork_mode = (
-            self._var_cowork.get() == "cowork"
-            if provider == "claude"
-            else False
-        )
-        updated = {
-            **self.config,
-            "mip_root":         self._var_root.get(),
-            "llm_provider":     provider,
-            "cowork_mode":      cowork_mode,
-            "default_language": self._var_language.get(),
-        }
-        _write_global_config(updated)
-        if self.on_save:
-            self.on_save()
-        messagebox.showinfo("Saved", "Settings saved successfully.")
         self.destroy()
