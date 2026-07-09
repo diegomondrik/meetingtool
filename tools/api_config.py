@@ -57,12 +57,24 @@ def get_anthropic_key() -> str:
     return _load_key(_ANTHROPIC_KEY)
 
 
-def get_gemini_key() -> str:
+def get_gemini_key(config: dict | None = None) -> str:
+    """
+    Return the Gemini API key.
+
+    Checks the project's mip.config.json first ("gemini_api_key" — a team key
+    shared across everyone working on that project), then falls back to the
+    personal system keychain. Anthropic keys are never looked up this way —
+    they stay strictly per-person via the keychain.
+    """
+    if config and config.get("gemini_api_key"):
+        return config["gemini_api_key"]
     return _load_key(_GEMINI_KEY)
 
 
-def get_gemini_key_2() -> str | None:
-    """Return the backup Gemini key, or None if not configured."""
+def get_gemini_key_2(config: dict | None = None) -> str | None:
+    """Return the backup Gemini key (project config first, then keychain), or None."""
+    if config and config.get("gemini_api_key_2"):
+        return config["gemini_api_key_2"]
     try:
         import keyring
         value = (keyring.get_password(_G7_SERVICE, _GEMINI_KEY_2)

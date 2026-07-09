@@ -28,8 +28,14 @@ from tools.extract_frames import (
 )
 from tools.prompt_generator import generate_meeting_prompt
 from tools.gemini_client import extract_visual_evidence, GeminiUnavailableError
-from tools.claude_client import generate_report, write_report
 from tools.api_config import get_gemini_key, get_gemini_key_2, get_anthropic_key
+
+try:
+    # 'anthropic' is optional — only the automated pipeline (--auto) needs it.
+    # Cowork/web workflows must be able to import this module without it installed.
+    from tools.claude_client import generate_report, write_report
+except ImportError:
+    generate_report = write_report = None
 
 log = logging.getLogger("runner")
 
@@ -471,6 +477,12 @@ def _run_cowork_automated(
     Full automated pipeline: extract_frames -> Gemini vision -> Claude report.
     Falls back to pytesseract OCR if Gemini is unavailable (GeminiUnavailableError).
     """
+    if generate_report is None:
+        raise RuntimeError(
+            "The 'anthropic' package is not installed. The automated pipeline "
+            "(--auto) needs it — run: pip install anthropic"
+        )
+
     budget     = max_frames_override or COWORK_FRAME_BUDGET
     frames_dir = frames_output_dir(meeting_folder)
 
@@ -508,8 +520,8 @@ def _run_cowork_automated(
         log.info(f"Transcript segments built: {len(transcript_segs)} frames with context")
 
     try:
-        gemini_key      = get_gemini_key()
-        gemini_key_2    = get_gemini_key_2()
+        gemini_key      = get_gemini_key(config)
+        gemini_key_2    = get_gemini_key_2(config)
         visual_evidence = extract_visual_evidence(
             frame_paths, gemini_key,
             transcript_segments=transcript_segs or None,

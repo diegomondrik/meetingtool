@@ -549,7 +549,12 @@ def run_setup():
     _print_step(4, "Configuration")
 
     default_root = str(Path.home() / "Documents" / "MeetingTool")
-    print(f"\n  Where should MeetingTool store projects and recordings?")
+    print(
+        f"\n  Where should MeetingTool store projects and recordings?\n"
+        f"  This is a DATA folder, separate from the code you cloned — it will hold\n"
+        f"  your client projects, recordings, and reports.\n"
+        f"  Just press Enter to accept the suggested default below."
+    )
     mip_root_str = _ask("MeetingTool root folder", default_root)
     mip_root = Path(mip_root_str).expanduser().resolve()
 
@@ -579,7 +584,17 @@ def run_setup():
 
     # ── Step 5: API keys ──
     _print_step(5, "API keys")
-    key_results = setup_api_keys()
+    if provider == "claude" and cowork_mode:
+        print(
+            "\n  You chose Claude Desktop with Cowork — MeetingTool never calls any\n"
+            "  API in this mode (Claude Desktop reads the frames and transcript\n"
+            "  directly). No API keys are needed. Skipping this step.\n"
+            "\n  (Only the automated pipeline — 'mip run --auto' — needs API keys.\n"
+            "  Run 'mip setup' again later if you ever want to enable it.)"
+        )
+        key_results = {"anthropic": None, "gemini": None}
+    else:
+        key_results = setup_api_keys()
 
     # ── Step 6: Folder structure ──
     _print_step(6, "Folder structure")

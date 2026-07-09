@@ -1168,7 +1168,7 @@ class TestRunnerAutomated:
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
         monkeypatch.setattr(runner, "extract_visual_evidence",
                             lambda paths, key, **kw: "Mock visual evidence from 3 frames.")
-        monkeypatch.setattr(runner, "get_gemini_key", lambda: "fake-gemini-key")
+        monkeypatch.setattr(runner, "get_gemini_key", lambda config=None: "fake-gemini-key")
         monkeypatch.setattr(runner, "generate_report",
                             lambda **kwargs: "# Meeting Report\n\nContent.")
         monkeypatch.setattr(runner, "get_anthropic_key", lambda: "fake-anthropic-key")
@@ -1203,7 +1203,7 @@ class TestRunnerAutomated:
 
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
         monkeypatch.setattr(runner, "extract_visual_evidence", fake_gemini)
-        monkeypatch.setattr(runner, "get_gemini_key", lambda: "fake-key")
+        monkeypatch.setattr(runner, "get_gemini_key", lambda config=None: "fake-key")
         monkeypatch.setattr(runner, "_ocr_fallback", lambda paths: "OCR text from 2 frames.")
         monkeypatch.setattr(runner, "generate_report",
                             lambda **kwargs: "# Fallback Report\n\nContent.")
@@ -1251,7 +1251,7 @@ class TestRunnerAutomated:
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
         monkeypatch.setattr(runner, "extract_visual_evidence",
                             lambda paths, key, **kw: "evidence")
-        monkeypatch.setattr(runner, "get_gemini_key", lambda: "k")
+        monkeypatch.setattr(runner, "get_gemini_key", lambda config=None: "k")
         monkeypatch.setattr(runner, "generate_report",
                             lambda **kwargs: "# Report")
         monkeypatch.setattr(runner, "get_anthropic_key", lambda: "k")
