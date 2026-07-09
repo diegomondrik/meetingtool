@@ -7,10 +7,10 @@ Uses the Gemini REST API directly (no google-genai SDK) to avoid native
 binary dependencies (cryptography/grpcio) that fail on ARM64 Windows.
 
 Pipeline:
-  1. Split frames into chunks of CHUNK_SIZE (~37 frames each)
+  1. Split frames into chunks of CHUNK_SIZE (70 frames, ~38k tokens each)
   2. POST each chunk to Gemini with the vision prompt
-  3. Collect text responses and concatenate into visual_evidence string
-  4. On HTTP 429: wait RETRY_DELAY seconds and retry once
+  3. Wait CHUNK_DELAY (65s) between chunks to stay within free-tier 40k TPM window
+  4. On HTTP 429: wait RETRY_DELAY (65s) and retry once
   5. On persistent failure: raise GeminiUnavailableError → caller activates OCR fallback
 """
 
@@ -24,15 +24,20 @@ import requests
 
 log = logging.getLogger("gemini_client")
 
-GEMINI_MODEL    = "gemini-1.5-flash"
+GEMINI_MODEL    = "gemini-2.0-flash"
 GEMINI_ENDPOINT = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
 
-CHUNK_SIZE   = 38    # frames per request — 4 chunks for 150 frames (38+38+38+36)
-CHUNK_DELAY  = 4.0   # seconds between chunks (TPM rate limit)
-RETRY_DELAY  = 15.0  # seconds to wait after HTTP 429 before single retry
+# Free-tier TPM limit: 40,000 tokens/min.
+# 720p frame = 2 tiles × 258 = 516 tokens. Prompt overhead ≈ 2,000 tokens.
+# Max safe frames per chunk: (40,000 - 2,000) / 516 ≈ 73. Using 70 for buffer.
+# Delay between chunks must be ≥ 60s so consecutive chunks don't merge into
+# the same TPM window.
+CHUNK_SIZE   = 70    # frames per request — stays under 40k TPM per window
+CHUNK_DELAY  = 65.0  # seconds between chunks — ensures a new 1-min TPM window
+RETRY_DELAY  = 65.0  # seconds to wait after HTTP 429 before single retry
 REQUEST_TIMEOUT = 120  # seconds per request
 
 VISION_PROMPT = """You are analyzing screenshots from a business meeting recording.
@@ -52,6 +57,13 @@ Rules:
 - Ignore empty participant video panels (plain black/grey rectangles)
 - If an image is too blurry or uninformative, write: [FRAME {n}] - Content: uninformative
 - Output plain text, no markdown headers
+- If a value or text is partially visible or unclear, mark it explicitly as
+  [ILLEGIBLE] rather than omitting it or guessing.
+- Capture non-text visual signals: elements in red/green/orange (alert states),
+  the largest or most visually prominent element on screen, any visual emphasis
+  (bold, large font, highlighted cell).
+- If this frame looks visually similar to previous frames in the session,
+  state what changed vs. what remained the same.
 """
 
 
@@ -64,8 +76,13 @@ def _encode_image(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
-def _build_payload(frame_paths: list[Path], chunk_index: int) -> dict:
-    """Build the JSON payload for one chunk of frames."""
+def _build_payload(frame_paths: list[Path], chunk_index: int,
+                   transcript_segments: dict | None = None) -> dict:
+    """Build the JSON payload for one chunk of frames.
+
+    transcript_segments: optional dict of {frame_global_index: transcript_snippet}.
+    When present, the snippet for a frame is injected as context before its image.
+    """
     parts = [{"text": VISION_PROMPT}]
 
     for i, path in enumerate(frame_paths):
@@ -73,6 +90,10 @@ def _build_payload(frame_paths: list[Path], chunk_index: int) -> dict:
         parts.append({
             "text": f"[FRAME {global_n}] — {path.name}"
         })
+        if transcript_segments and global_n in transcript_segments:
+            parts.append({
+                "text": f"[Speaker context at this moment]: {transcript_segments[global_n]}"
+            })
         parts.append({
             "inline_data": {
                 "mime_type": "image/jpeg",
@@ -115,21 +136,27 @@ def _post_chunk(payload: dict, api_key: str) -> str:
         raise ValueError(f"Unexpected Gemini response shape: {data}") from exc
 
 
-def extract_visual_evidence(frame_paths: list[Path], api_key: str) -> str:
+def extract_visual_evidence(frame_paths: list[Path], api_key: str,
+                            transcript_segments: dict | None = None,
+                            api_key_2: str | None = None) -> str:
     """
     Send all frames to Gemini in chunks and return the combined visual_evidence string.
 
     Args:
-        frame_paths: Ordered list of JPEG frame paths.
-        api_key:     Gemini API key (from api_config.get_gemini_key()).
+        frame_paths:          Ordered list of JPEG frame paths.
+        api_key:              Primary Gemini API key.
+        transcript_segments:  Optional dict of {frame_global_index: transcript_snippet}.
+        api_key_2:            Optional backup Gemini key. When key 1 is exhausted on a
+                              429 after retry, key 2 is tried before raising
+                              GeminiUnavailableError.
 
     Returns:
         Single string combining all chunk responses — the visual_evidence
         payload passed to the Claude stage.
 
     Raises:
-        GeminiUnavailableError: If Gemini fails after one retry. Caller
-                                should activate the OCR fallback.
+        GeminiUnavailableError: If Gemini fails after all retry/fallback attempts.
+                                Caller should activate the OCR fallback.
     """
     if not frame_paths:
         log.warning("No frames provided to Gemini — returning empty visual_evidence")
@@ -143,13 +170,14 @@ def extract_visual_evidence(frame_paths: list[Path], api_key: str) -> str:
     log.info(
         f"Sending {len(frame_paths)} frames to Gemini in {len(chunks)} chunk(s) "
         f"({CHUNK_SIZE} frames each, {CHUNK_DELAY}s delay)"
+        + (" [with transcript context]" if transcript_segments else "")
     )
 
     results = []
 
     for idx, chunk in enumerate(chunks):
         log.info(f"  Chunk {idx + 1}/{len(chunks)}: {len(chunk)} frames...")
-        payload = _build_payload(chunk, idx)
+        payload = _build_payload(chunk, idx, transcript_segments)
 
         try:
             text = _post_chunk(payload, api_key)
@@ -167,9 +195,22 @@ def extract_visual_evidence(frame_paths: list[Path], api_key: str) -> str:
                     results.append(text)
                     log.info(f"  Chunk {idx + 1} retry OK")
                 except Exception as retry_exc:
-                    raise GeminiUnavailableError(
-                        f"Gemini rate-limited on chunk {idx + 1} after retry: {retry_exc}"
-                    ) from retry_exc
+                    if api_key_2:
+                        log.warning(
+                            f"  Chunk {idx + 1}: key 1 exhausted — switching to backup key..."
+                        )
+                        try:
+                            text = _post_chunk(payload, api_key_2)
+                            results.append(text)
+                            log.info(f"  Chunk {idx + 1} OK via backup key")
+                        except Exception as key2_exc:
+                            raise GeminiUnavailableError(
+                                f"Gemini rate-limited on chunk {idx + 1}, both keys failed: {key2_exc}"
+                            ) from key2_exc
+                    else:
+                        raise GeminiUnavailableError(
+                            f"Gemini rate-limited on chunk {idx + 1} after retry: {retry_exc}"
+                        ) from retry_exc
             else:
                 raise GeminiUnavailableError(
                     f"Gemini error on chunk {idx + 1}: {exc}"

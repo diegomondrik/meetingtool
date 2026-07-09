@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetingTool — User Guide</title>
+<style>
+  :root {
+    --bg: #f7f8fc;
+    --surface: #ffffff;
+    --surface-2: #f0f2f7;
+    --border: #e0e4ef;
+    --text: #18192a;
+    --text-2: #52566e;
+    --accent: #3b6ef5;
+    --accent-dim: #dce6ff;
+    --code-bg: #eef0f6;
+    --code-text: #2d3250;
+    --success: #1d8a5e;
+    --warn: #b35c00;
+    --tag-a: #1a6e3a;
+    --tag-a-bg: #d4f0e0;
+    --tag-b: #1a4d8a;
+    --tag-b-bg: #d4e5f7;
+    --tag-c: #6b2fa0;
+    --tag-c-bg: #ead4f7;
+    --radius: 8px;
+    --shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10111c; --surface: #181a28; --surface-2: #1f2134;
+      --border: #2a2d42; --text: #dde1f0; --text-2: #8b90ab;
+      --accent: #5b84f7; --accent-dim: #1e2a50;
+      --code-bg: #0e0f1a; --code-text: #a8b0d8;
+      --success: #2ec47e; --warn: #e08a30;
+      --tag-a: #2ec47e; --tag-a-bg: #0d2a1e;
+      --tag-b: #5b84f7; --tag-b-bg: #101c38;
+      --tag-c: #b57af5; --tag-c-bg: #1e1030;
+      --shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f8fc; --surface: #ffffff; --surface-2: #f0f2f7;
+    --border: #e0e4ef; --text: #18192a; --text-2: #52566e;
+    --accent: #3b6ef5; --accent-dim: #dce6ff;
+    --code-bg: #eef0f6; --code-text: #2d3250;
+    --tag-a: #1a6e3a; --tag-a-bg: #d4f0e0;
+    --tag-b: #1a4d8a; --tag-b-bg: #d4e5f7;
+    --tag-c: #6b2fa0; --tag-c-bg: #ead4f7;
+    --shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  :root[data-theme="dark"] {
+    --bg: #10111c; --surface: #181a28; --surface-2: #1f2134;
+    --border: #2a2d42; --text: #dde1f0; --text-2: #8b90ab;
+    --accent: #5b84f7; --accent-dim: #1e2a50;
+    --code-bg: #0e0f1a; --code-text: #a8b0d8;
+    --tag-a: #2ec47e; --tag-a-bg: #0d2a1e;
+    --tag-b: #5b84f7; --tag-b-bg: #101c38;
+    --tag-c: #b57af5; --tag-c-bg: #1e1030;
+    --shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; line-height: 1.7;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+
+  .layout { display: flex; min-height: 100vh; }
+
+  nav {
+    width: 240px; flex-shrink: 0;
+    background: var(--surface); border-right: 1px solid var(--border);
+    padding: 32px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  nav .logo { padding: 0 24px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  nav .logo-title { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  nav .logo-sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+  nav a {
+    display: block; padding: 6px 24px; font-size: 13px;
+    color: var(--text-2); text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  nav a:hover { color: var(--accent); background: var(--accent-dim); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+  nav .nav-section { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); padding: 16px 24px 4px; }
+
+  main { flex: 1; max-width: 820px; padding: 56px 48px; min-width: 0; }
+
+  .page-header { margin-bottom: 48px; }
+  .page-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  .page-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; color: var(--text); text-wrap: balance; }
+  .page-lead { font-size: 17px; color: var(--text-2); margin-top: 12px; max-width: 580px; line-height: 1.6; }
+
+  section { margin-bottom: 56px; }
+  h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15px; font-weight: 600; color: var(--text); margin: 24px 0 10px; }
+  p { color: var(--text-2); margin-bottom: 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  pre, code { font-family: "SF Mono", "Fira Code", Consolas, "Courier New", monospace; font-size: 13px; }
+  code { background: var(--code-bg); color: var(--accent); padding: 1px 6px; border-radius: 4px; }
+  pre { background: var(--code-bg); color: var(--code-text); padding: 16px 20px; border-radius: var(--radius); overflow-x: auto; margin: 12px 0; border: 1px solid var(--border); line-height: 1.6; }
+  pre code { background: none; color: inherit; padding: 0; }
+
+  .callout { border-radius: var(--radius); padding: 14px 18px; margin: 16px 0; font-size: 14px; border-left: 3px solid; background: var(--surface-2); }
+  .callout.tip { border-color: var(--accent); }
+  .callout.warn { border-color: var(--warn); }
+  .callout strong { display: block; margin-bottom: 2px; }
+  .callout.tip strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout p { color: var(--text-2); margin: 0; font-size: 13px; }
+
+  /* Workflow cards */
+  .workflow-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 32px; }
+  .wf-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+    cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .wf-card:hover { border-color: var(--accent); box-shadow: 0 2px 12px rgba(59,110,245,0.12); }
+  .wf-badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 20px; margin-bottom: 8px;
+  }
+  .wf-a .wf-badge { color: var(--tag-a); background: var(--tag-a-bg); }
+  .wf-b .wf-badge { color: var(--tag-b); background: var(--tag-b-bg); }
+  .wf-c .wf-badge { color: var(--tag-c); background: var(--tag-c-bg); }
+  .wf-name { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .wf-desc { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+
+  /* Steps */
+  .steps { display: flex; flex-direction: column; }
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 0 20px; }
+  .step-line { display: flex; flex-direction: column; align-items: center; }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .step-connector { flex: 1; width: 2px; background: var(--border); margin: 4px 0; min-height: 20px; }
+  .step:last-child .step-connector { display: none; }
+  .step-body { padding-bottom: 28px; }
+  .step-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 8px; line-height: 28px; }
+
+  /* Folder tree */
+  .tree {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 20px;
+    font-family: "SF Mono", "Fira Code", Consolas, monospace;
+    font-size: 13px; line-height: 1.8; color: var(--code-text);
+    overflow-x: auto;
+  }
+  .tree .dir { color: var(--accent); font-weight: 600; }
+  .tree .comment { color: var(--text-2); }
+
+  /* Meeting types table */
+  .mtable { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 12px; }
+  .mtable th { text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .mtable td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: top; }
+  .mtable tr:last-child td { border-bottom: none; }
+  .mtable td:first-child { color: var(--text); font-weight: 500; }
+  .mtable code { font-size: 12px; }
+
+  /* Lifecycle */
+  .lifecycle { display: flex; align-items: center; gap: 0; margin: 20px 0; flex-wrap: wrap; }
+  .lc-step {
+    flex: 1; min-width: 120px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; text-align: center;
+    font-size: 13px;
+  }
+  .lc-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); margin-bottom: 3px; }
+  .lc-name { font-weight: 600; color: var(--text); font-size: 13px; }
+  .lc-arrow { color: var(--text-2); font-size: 18px; padding: 0 6px; flex-shrink: 0; }
+
+  .theme-toggle {
+    position: fixed; top: 16px; right: 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 6px 14px;
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+    cursor: pointer; box-shadow: var(--shadow); z-index: 100; transition: color 0.15s;
+  }
+  .theme-toggle:hover { color: var(--accent); }
+
+  @media (max-width: 720px) {
+    nav { display: none; }
+    main { padding: 32px 20px; }
+    .workflow-grid { grid-template-columns: 1fr; }
+    .lifecycle { flex-direction: column; }
+    .lc-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()">Toggle theme</button>
+
+<div class="layout">
+  <nav>
+    <div class="logo">
+      <div class="logo-title">MeetingTool</div>
+      <div class="logo-sub">User Guide</div>
+    </div>
+    <div class="nav-section">Core concepts</div>
+    <a href="#workflows">Workflows</a>
+    <a href="#projects">Projects</a>
+    <a href="#report-lifecycle">Report lifecycle</a>
+    <div class="nav-section">Workflows</div>
+    <a href="#workflow-a">A — Automated</a>
+    <a href="#workflow-b">B — Cowork</a>
+    <a href="#workflow-c">C — Web</a>
+    <div class="nav-section">Reference</div>
+    <a href="#meeting-types">Meeting types</a>
+    <a href="#folder-structure">Folder structure</a>
+    <a href="#commands">All commands</a>
+  </nav>
+
+  <main>
+    <div class="page-header">
+      <div class="page-eyebrow">MeetingTool v3.0</div>
+      <h1 class="page-title">User Guide</h1>
+      <p class="page-lead">MeetingTool processes Teams recordings and generates structured executive reports. Choose the workflow that matches how you use AI — fully automated, via Claude Desktop, or through any LLM browser.</p>
+    </div>
+
+    <!-- Workflows overview -->
+    <section id="workflows">
+      <h2>Workflows</h2>
+      <p>Three workflows are available. Pick based on the tools you have access to:</p>
+      <div class="workflow-grid">
+        <div class="wf-card wf-a">
+          <div class="wf-badge">Workflow A</div>
+          <div class="wf-name">Automated Pipeline</div>
+          <div class="wf-desc">Gemini extracts frames, Claude writes the report. Fully hands-off. Requires API keys.</div>
+        </div>
+        <div class="wf-card wf-b">
+          <div class="wf-badge">Workflow B</div>
+          <div class="wf-name">Cowork</div>
+          <div class="wf-desc">Claude Desktop reads frames and transcript directly. No API keys needed.</div>
+        </div>
+        <div class="wf-card wf-c">
+          <div class="wf-badge">Workflow C</div>
+          <div class="wf-name">Web</div>
+          <div class="wf-desc">Upload checklist for any LLM browser — Claude, ChatGPT, Gemini. Most flexible.</div>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <strong>Don't have API keys?</strong>
+        <p>Workflows B and C work entirely without API keys. Workflow A is the only one that requires them.</p>
+      </div>
+    </section>
+
+    <!-- Projects -->
+    <section id="projects">
+      <h2>Projects</h2>
+      <p>MeetingTool organizes meetings by client and project. Create a project once per engagement — then run meeting analysis commands from within it.</p>
+      <pre><code># Create a new project
+python mip.py project new
+
+# List all projects
+python mip.py project list</code></pre>
+      <p>When you create a project, MeetingTool will ask for:</p>
+      <ul style="margin-left:18px; color:var(--text-2); font-size:14px; line-height:2.2;">
+        <li><strong style="color:var(--text);">Client name</strong> — used to organize the folder structure</li>
+        <li><strong style="color:var(--text);">Project name</strong> — the specific engagement or workstream</li>
+        <li><strong style="color:var(--text);">Default report language</strong> — English or Spanish (can be overridden per meeting)</li>
+        <li><strong style="color:var(--text);">LLM provider</strong> — Claude, ChatGPT, or Gemini</li>
+      </ul>
+      <p style="margin-top:12px;">At the end, MeetingTool prints the <strong>Claude Project Instructions</strong> (or equivalent) that you paste into your AI tool. Do this before analyzing your first meeting.</p>
+    </section>
+
+    <!-- Report lifecycle -->
+    <section id="report-lifecycle">
+      <h2>Report Lifecycle</h2>
+      <div class="lifecycle">
+        <div class="lc-step"><div class="lc-label">Input</div><div class="lc-name">.mp4 + .docx</div></div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step"><div class="lc-label">Extract</div><div class="lc-name">Frames + transcript</div></div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step"><div class="lc-label">Analyze</div><div class="lc-name">LLM report</div></div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step"><div class="lc-label">Review</div><div class="lc-name">report_YYYYMMDD.md</div></div>
+        <div class="lc-arrow">→</div>
+        <div class="lc-step"><div class="lc-label">Export</div><div class="lc-name">report_YYYYMMDD.docx</div></div>
+      </div>
+      <p>The report lives as a Markdown file during analysis. Images are referenced by filename; you verify them locally in the <code>imagenes_reunion/</code> folder. DOCX export (with embedded images) is a separate manual step — only run it when the report is approved.</p>
+      <pre><code>python mip.py export --path "&lt;meeting_folder&gt;"</code></pre>
+      <div class="callout tip">
+        <strong>Language detection</strong>
+        <p>If the meeting transcript language differs from the project default, MeetingTool prompts you to choose: project default, meeting language, or both (two separate report files).</p>
+      </div>
+    </section>
+
+    <!-- Workflow A -->
+    <section id="workflow-a">
+      <h2>Workflow A — Automated Pipeline</h2>
+      <p>Fully hands-off. Gemini extracts visible content from screen captures; Claude writes the full report. Requires an Anthropic API key and a Gemini API key.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-line"><div class="step-num">1</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Prepare the meeting folder</div>
+            <p>Place the recording and transcript in the same folder, named with the meeting date:</p>
+            <pre><code>MeetingName_YYYYMMDD.mp4
+MeetingName_YYYYMMDD.docx</code></pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">2</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Run the automated pipeline</div>
+            <pre><code>python mip.py run --path "&lt;meeting_folder&gt;" --auto</code></pre>
+            <p>MeetingTool will extract frames (720p, SSIM-deduplicated), send them to Gemini for visual analysis, then call Claude to generate the report. The output is <code>report_YYYYMMDD.md</code> in the meeting folder.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">3</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Review and export</div>
+            <pre><code># When the report is approved
+python mip.py export --path "&lt;meeting_folder&gt;"</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="callout warn">
+        <strong>Privacy</strong>
+        <p>In automated mode, frames are sent to Google Gemini and the full transcript is sent to Anthropic Claude. Review their data policies before processing confidential client content.</p>
+      </div>
+      <h3>Gemini quota and fallback</h3>
+      <p>The free Gemini tier allows 1,500 requests/day. If the primary key hits quota, a backup key activates automatically (configure it during setup). If Gemini is completely unavailable, MeetingTool activates an OCR fallback — Claude generates the report from the transcript only. Report quality is lower without visual evidence, but the pipeline never blocks.</p>
+    </section>
+
+    <!-- Workflow B -->
+    <section id="workflow-b">
+      <h2>Workflow B — Cowork (Claude Desktop)</h2>
+      <p>For users running Claude Desktop with the Cowork integration. MeetingTool extracts up to 150 frames intelligently and makes them available for Claude to read directly — no API keys required.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-line"><div class="step-num">1</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Prepare the meeting folder</div>
+            <pre><code>MeetingName_YYYYMMDD.mp4
+MeetingName_YYYYMMDD.docx</code></pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">2</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Run from Cowork</div>
+            <pre><code>mip run --path "&lt;meeting_folder&gt;"</code></pre>
+            <p>MeetingTool extracts frames, reads the transcript, and prepares the context. Claude Desktop generates <code>report_YYYYMMDD.md</code> through the Cowork interface.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">3</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Review in Cowork, then export</div>
+            <p>Iterate on the report directly in the Cowork chat. When satisfied:</p>
+            <pre><code>mip export --path "&lt;meeting_folder&gt;"</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workflow C -->
+    <section id="workflow-c">
+      <h2>Workflow C — Web (any LLM browser)</h2>
+      <p>For users running Claude web, ChatGPT, or Gemini without desktop access. MeetingTool selects the best frames and prints a step-by-step upload checklist.</p>
+
+      <h3>Short meetings (under 45 min)</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-line"><div class="step-num">1</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Generate the upload checklist</div>
+            <pre><code>python mip.py run --path "&lt;meeting_folder&gt;" --web</code></pre>
+            <p>MeetingTool selects the 20 best frames and prints an upload checklist in the terminal.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">2</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Upload to your LLM browser</div>
+            <p>Follow the checklist: upload the transcript file and the selected frames to a new chat. Paste the prompt pack printed in the terminal.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-line"><div class="step-num">3</div><div class="step-connector"></div></div>
+          <div class="step-body">
+            <div class="step-title">Save and export</div>
+            <p>Copy the generated report and save it as <code>report_YYYYMMDD.md</code> in the meeting folder. Then export when ready:</p>
+            <pre><code>python mip.py export --path "&lt;meeting_folder&gt;"</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <h3>Long meetings (45+ min) — two-pass mode</h3>
+      <p>For meetings over 45 minutes, use two-pass mode. It splits the meeting into two halves, analyzes each separately, then produces a merged final report.</p>
+      <pre><code>python mip.py run --path "&lt;meeting_folder&gt;" --web --two-pass</code></pre>
+      <ol style="margin-left:18px; color:var(--text-2); font-size:14px; line-height:2.2;">
+        <li><strong style="color:var(--text);">Chat 1:</strong> upload first half transcript + 20 frames → paste Chat 1 prompt pack</li>
+        <li>LLM generates partial analysis + handoff JSON block</li>
+        <li>Run <code>mip handoff save --path &lt;folder&gt;</code> → paste the handoff JSON when prompted</li>
+        <li><strong style="color:var(--text);">Chat 2:</strong> upload <code>handoff.json</code> + second half transcript + 20 frames → paste Chat 2 prompt pack</li>
+        <li>LLM generates the complete merged report</li>
+      </ol>
+    </section>
+
+    <!-- Meeting types -->
+    <section id="meeting-types">
+      <h2>Meeting Types</h2>
+      <p>Five types are available by default. The type determines which additional sections appear in the report.</p>
+      <table class="mtable">
+        <thead>
+          <tr><th>Type</th><th>CLI key</th><th>Additional report sections</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Discovery / Pre-sales</td><td><code>discovery</code></td><td>Sales signals, project fit, opportunity assessment</td></tr>
+          <tr><td>Kickoff / Project start</td><td><code>kickoff</code></td><td>Project definition, team structure, success criteria</td></tr>
+          <tr><td>Status / Progress</td><td><code>status</code></td><td>Project status, delta since last meeting, blockers</td></tr>
+          <tr><td>Technical / Analysis</td><td><code>technical</code></td><td>Technical decisions, visual analysis, dependencies</td></tr>
+          <tr><td>Training / Enablement</td><td><code>training</code></td><td>Training context, comprehension, gaps &amp; follow-up, adoption next steps</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px;">Custom meeting types can be added per project in <code>mip.config.json</code> inside the project folder.</p>
+    </section>
+
+    <!-- Folder structure -->
+    <section id="folder-structure">
+      <h2>Folder Structure</h2>
+      <div class="tree">
+<span class="dir">~/Documents/MeetingTool/</span>              <span class="comment"># mip_root (set during setup)</span>
+├── mip.config.json                          <span class="comment"># global config</span>
+├── <span class="dir">tools/</span>
+│   └── test_meeting.mp4                     <span class="comment"># test fixture (generated by setup)</span>
+├── <span class="dir">prompt_pack/</span>
+│   └── <span class="dir">claude/</span>
+│       └── project_instructions.md          <span class="comment"># Claude Project template</span>
+└── <span class="dir">projects/</span>
+    └── <span class="dir">{Client}/</span>
+        └── <span class="dir">{Project}/</span>
+            ├── mip.config.json              <span class="comment"># project config</span>
+            └── <span class="dir">{MeetingName}_{YYYYMMDD}/</span>
+                ├── {MeetingName}_{YYYYMMDD}.mp4
+                ├── {MeetingName}_{YYYYMMDD}.docx
+                ├── {MeetingName}_{YYYYMMDD}.txt  <span class="comment"># parsed transcript</span>
+                ├── report_{YYYYMMDD}.md           <span class="comment"># working report</span>
+                ├── report_{YYYYMMDD}.docx         <span class="comment"># on-demand export</span>
+                └── <span class="dir">imagenes_reunion/</span>
+                    ├── frame_001_t00-03-12.jpg
+                    └── …
+      </div>
+    </section>
+
+    <!-- Commands -->
+    <section id="commands">
+      <h2>All Commands</h2>
+      <table class="mtable">
+        <thead>
+          <tr><th>Command</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>mip.py setup</code></td><td>Run or re-run the installer</td></tr>
+          <tr><td><code>mip.py project new</code></td><td>Create a new client project</td></tr>
+          <tr><td><code>mip.py project list</code></td><td>List all projects</td></tr>
+          <tr><td><code>mip.py run --path &lt;folder&gt;</code></td><td>Cowork workflow (default)</td></tr>
+          <tr><td><code>mip.py run --path &lt;folder&gt; --auto</code></td><td>Automated pipeline (Gemini + Claude)</td></tr>
+          <tr><td><code>mip.py run --path &lt;folder&gt; --web</code></td><td>Web workflow — generates upload checklist</td></tr>
+          <tr><td><code>mip.py run --path &lt;folder&gt; --web --two-pass</code></td><td>Two-pass web mode for long meetings (45+ min)</td></tr>
+          <tr><td><code>mip.py handoff save --path &lt;folder&gt;</code></td><td>Save handoff JSON between two-pass chats</td></tr>
+          <tr><td><code>mip.py export --path &lt;folder&gt;</code></td><td>Export approved report to DOCX</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  function toggleTheme() {
+    const root = document.documentElement;
+    const current = root.getAttribute('data-theme');
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (!current) root.setAttribute('data-theme', sys === 'dark' ? 'light' : 'dark');
+    else root.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+  }
+
+  const anchors = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    anchors.forEach(s => { if (window.scrollY >= s.offsetTop - 80) current = s.id; });
+    navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + current); });
+  }, { passive: true });
+</script>
+</body>
+</html>

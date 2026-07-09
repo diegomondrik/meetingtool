@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetingTool — Installation Guide</title>
+<style>
+  :root {
+    --bg: #f7f8fc;
+    --surface: #ffffff;
+    --surface-2: #f0f2f7;
+    --border: #e0e4ef;
+    --text: #18192a;
+    --text-2: #52566e;
+    --accent: #3b6ef5;
+    --accent-dim: #dce6ff;
+    --code-bg: #eef0f6;
+    --code-text: #2d3250;
+    --success: #1d8a5e;
+    --warn: #b35c00;
+    --step-size: 28px;
+    --radius: 8px;
+    --shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10111c;
+      --surface: #181a28;
+      --surface-2: #1f2134;
+      --border: #2a2d42;
+      --text: #dde1f0;
+      --text-2: #8b90ab;
+      --accent: #5b84f7;
+      --accent-dim: #1e2a50;
+      --code-bg: #0e0f1a;
+      --code-text: #a8b0d8;
+      --success: #2ec47e;
+      --warn: #e08a30;
+      --shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f8fc; --surface: #ffffff; --surface-2: #f0f2f7;
+    --border: #e0e4ef; --text: #18192a; --text-2: #52566e;
+    --accent: #3b6ef5; --accent-dim: #dce6ff;
+    --code-bg: #eef0f6; --code-text: #2d3250;
+    --success: #1d8a5e; --warn: #b35c00;
+    --shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  :root[data-theme="dark"] {
+    --bg: #10111c; --surface: #181a28; --surface-2: #1f2134;
+    --border: #2a2d42; --text: #dde1f0; --text-2: #8b90ab;
+    --accent: #5b84f7; --accent-dim: #1e2a50;
+    --code-bg: #0e0f1a; --code-text: #a8b0d8;
+    --success: #2ec47e; --warn: #e08a30;
+    --shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  nav {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 32px 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  nav .logo {
+    padding: 0 24px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  nav .logo-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  nav .logo-sub {
+    font-size: 11px;
+    color: var(--text-2);
+    margin-top: 2px;
+  }
+
+  nav a {
+    display: block;
+    padding: 6px 24px;
+    font-size: 13px;
+    color: var(--text-2);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  nav a:hover { color: var(--accent); background: var(--accent-dim); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+  nav .nav-section {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-2);
+    padding: 16px 24px 4px;
+  }
+
+  main {
+    flex: 1;
+    max-width: 780px;
+    padding: 56px 48px;
+    min-width: 0;
+  }
+
+  /* Header */
+  .page-header { margin-bottom: 48px; }
+  .page-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .page-title {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: var(--text);
+    text-wrap: balance;
+  }
+  .page-lead {
+    font-size: 17px;
+    color: var(--text-2);
+    margin-top: 12px;
+    max-width: 560px;
+    line-height: 1.6;
+  }
+
+  /* Sections */
+  section { margin-bottom: 56px; }
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 15px; font-weight: 600; color: var(--text); margin: 20px 0 10px; }
+  p { color: var(--text-2); margin-bottom: 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  /* Steps */
+  .steps { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: grid;
+    grid-template-columns: var(--step-size) 1fr;
+    gap: 0 20px;
+    position: relative;
+  }
+  .step + .step { margin-top: 0; }
+  .step-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .step-num {
+    width: var(--step-size);
+    height: var(--step-size);
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    z-index: 1;
+  }
+  .step-connector {
+    flex: 1;
+    width: 2px;
+    background: var(--border);
+    margin: 4px 0;
+    min-height: 24px;
+  }
+  .step:last-child .step-connector { display: none; }
+  .step-body {
+    padding-bottom: 32px;
+  }
+  .step-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 8px;
+    line-height: var(--step-size);
+  }
+  .step-body p { margin-bottom: 10px; }
+
+  /* Code */
+  pre, code {
+    font-family: "SF Mono", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 13px;
+  }
+  code {
+    background: var(--code-bg);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 16px 20px;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    margin: 12px 0;
+    border: 1px solid var(--border);
+    line-height: 1.6;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+
+  /* Cards / callouts */
+  .callout {
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 14px;
+    border-left: 3px solid;
+    background: var(--surface-2);
+  }
+  .callout.tip { border-color: var(--accent); }
+  .callout.warn { border-color: var(--warn); }
+  .callout strong { display: block; margin-bottom: 2px; }
+  .callout.tip strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout p { color: var(--text-2); margin: 0; font-size: 13px; }
+
+  /* Requirements grid */
+  .req-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+  .req-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .req-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); margin-bottom: 4px; }
+  .req-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .req-detail { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+
+  /* Platform tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    background: none;
+    color: var(--text-2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab-panel { display: none; padding-top: 16px; }
+  .tab-panel.active { display: block; }
+
+  /* Troubleshoot */
+  .faq { display: flex; flex-direction: column; gap: 12px; }
+  .faq-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .faq-q {
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+  }
+  .faq-q::after { content: "+"; font-size: 18px; color: var(--text-2); transition: transform 0.2s; }
+  .faq-item.open .faq-q::after { content: "−"; }
+  .faq-a {
+    display: none;
+    padding: 0 18px 14px;
+    font-size: 13px;
+    color: var(--text-2);
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .faq-item.open .faq-a { display: block; }
+
+  /* Theme toggle */
+  .theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    z-index: 100;
+    transition: color 0.15s;
+  }
+  .theme-toggle:hover { color: var(--accent); }
+
+  @media (max-width: 720px) {
+    nav { display: none; }
+    main { padding: 32px 20px; }
+    .req-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()">Toggle theme</button>
+
+<div class="layout">
+  <nav>
+    <div class="logo">
+      <div class="logo-title">MeetingTool</div>
+      <div class="logo-sub">Installation Guide</div>
+    </div>
+    <div class="nav-section">Setup</div>
+    <a href="#requirements">Requirements</a>
+    <a href="#install-ffmpeg">Install ffmpeg</a>
+    <a href="#install-app">Install MeetingTool</a>
+    <a href="#first-project">First Project</a>
+    <div class="nav-section">Reference</div>
+    <a href="#api-keys">API Keys</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+  </nav>
+
+  <main>
+    <div class="page-header">
+      <div class="page-eyebrow">MeetingTool v3.0</div>
+      <h1 class="page-title">Installation Guide</h1>
+      <p class="page-lead">Set up MeetingTool on a new machine in about 10 minutes. You need Python, ffmpeg, and a git client — the installer handles everything else.</p>
+    </div>
+
+    <!-- Requirements -->
+    <section id="requirements">
+      <h2>Requirements</h2>
+      <div class="req-grid">
+        <div class="req-card">
+          <div class="req-label">Required</div>
+          <div class="req-name">Python 3.11+</div>
+          <div class="req-detail">Any 3.11, 3.12, or 3.13 release</div>
+        </div>
+        <div class="req-card">
+          <div class="req-label">Required</div>
+          <div class="req-name">ffmpeg</div>
+          <div class="req-detail">For video frame extraction</div>
+        </div>
+        <div class="req-card">
+          <div class="req-label">Optional</div>
+          <div class="req-name">Anthropic API key</div>
+          <div class="req-detail">For automated report generation</div>
+        </div>
+        <div class="req-card">
+          <div class="req-label">Optional</div>
+          <div class="req-name">Gemini API key</div>
+          <div class="req-detail">For automated frame extraction</div>
+        </div>
+      </div>
+      <div class="callout tip" style="margin-top:16px;">
+        <strong>API keys are optional</strong>
+        <p>The Cowork and web workflows work without API keys. You only need keys for the fully automated pipeline (Workflow A).</p>
+      </div>
+    </section>
+
+    <!-- ffmpeg -->
+    <section id="install-ffmpeg">
+      <h2>Install ffmpeg</h2>
+      <p>ffmpeg must be installed and available on your system PATH before running the MeetingTool installer. The installer will check for it and guide you if it's missing.</p>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(this,'win')">Windows</button>
+        <button class="tab-btn" onclick="switchTab(this,'mac')">macOS</button>
+        <button class="tab-btn" onclick="switchTab(this,'linux')">Linux</button>
+      </div>
+
+      <div id="tab-win" class="tab-panel active">
+        <p>The easiest method is <strong>winget</strong> (built into Windows 11):</p>
+        <pre><code>winget install Gyan.FFmpeg</code></pre>
+        <p>Or install manually:</p>
+        <ol style="margin-left:20px; color:var(--text-2); font-size:14px; line-height:2;">
+          <li>Download the <strong>Release Full</strong> build from <code>ffmpeg.org/download.html</code> → Windows → gyan.dev</li>
+          <li>Extract to <code>C:\ffmpeg\</code></li>
+          <li>Add <code>C:\ffmpeg\bin</code> to your system PATH:<br>
+              Win+X → System → Advanced system settings → Environment Variables → System Variables → Path → Edit → New</li>
+          <li>Close and reopen your terminal, then verify: <code>ffmpeg -version</code></li>
+        </ol>
+      </div>
+
+      <div id="tab-mac" class="tab-panel">
+        <pre><code>brew install ffmpeg</code></pre>
+        <p>Requires Homebrew. If you don't have it: <code>brew.sh</code></p>
+      </div>
+
+      <div id="tab-linux" class="tab-panel">
+        <pre><code># Ubuntu / Debian
+sudo apt install ffmpeg
+
+# Fedora
+sudo dnf install ffmpeg</code></pre>
+      </div>
+
+      <div class="callout tip" style="margin-top:16px;">
+        <strong>Verify the install</strong>
+        <p>Run <code>ffmpeg -version</code> in a new terminal window. You should see version info. If the command is not found, close and reopen your terminal — PATH changes require a fresh session.</p>
+      </div>
+    </section>
+
+    <!-- Install app -->
+    <section id="install-app">
+      <h2>Install MeetingTool</h2>
+      <div class="steps">
+
+        <div class="step">
+          <div class="step-line">
+            <div class="step-num">1</div>
+            <div class="step-connector"></div>
+          </div>
+          <div class="step-body">
+            <div class="step-title">Clone the repository</div>
+            <p>Choose a permanent location for the MeetingTool program files — this is not where your meeting recordings or reports will go (the installer will ask you that separately).</p>
+            <pre><code>git clone https://github.com/diegomondrik/meetingtool.git
+cd meetingtool</code></pre>
+            <div class="callout tip">
+              <strong>New to git clone?</strong>
+              <p>This command downloads MeetingTool into a new subfolder called <code>meetingtool</code> inside whichever folder your terminal is currently in. Navigate to your preferred location first, e.g. <code>cd C:\Tools</code> on Windows or <code>cd ~/Applications</code> on Mac.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-line">
+            <div class="step-num">2</div>
+            <div class="step-connector"></div>
+          </div>
+          <div class="step-body">
+            <div class="step-title">Run the installer</div>
+            <pre><code>python mip.py setup</code></pre>
+            <p>The installer will walk you through these steps automatically:</p>
+            <ul style="margin-left:18px; color:var(--text-2); font-size:14px; line-height:2;">
+              <li>Verify Python version and ffmpeg</li>
+              <li>Install required Python packages</li>
+              <li>Choose where to store projects and meeting recordings</li>
+              <li>Choose your AI tool (Claude, ChatGPT, or Gemini)</li>
+              <li>Set default report language (English or Spanish)</li>
+              <li>Enter API keys (optional — stored securely in the system keychain)</li>
+              <li>Create the folder structure</li>
+              <li>Generate a Windows launcher (<code>MeetingTool.bat</code>)</li>
+            </ul>
+            <div class="callout warn" style="margin-top:12px;">
+              <strong>Windows: multiple Python versions</strong>
+              <p>If you have more than one Python installed, the installer will detect this and print a warning. It will create the launcher using the exact Python version you ran setup with, so double-clicking <code>MeetingTool.bat</code> always uses the right one.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-line">
+            <div class="step-num">3</div>
+            <div class="step-connector"></div>
+          </div>
+          <div class="step-body">
+            <div class="step-title">Verify the install</div>
+            <pre><code>python mip.py --help</code></pre>
+            <p>You should see the list of available commands. If setup completed without errors, MeetingTool is ready to use.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- First project -->
+    <section id="first-project">
+      <h2>Create Your First Project</h2>
+      <p>MeetingTool organizes work by client and project. Run this command to set up your first one:</p>
+      <pre><code>python mip.py project new</code></pre>
+      <p>You'll be asked for the client name, project name, meeting language, and which AI tool to use. At the end, MeetingTool prints the exact instructions to configure your Claude Project (or ChatGPT/Gemini equivalent) — follow those before analyzing your first meeting.</p>
+      <div class="callout tip">
+        <strong>Next step</strong>
+        <p>Once your project is created, see the <a href="user-guide.html" style="color:var(--accent);">User Guide</a> for how to run your first meeting analysis.</p>
+      </div>
+    </section>
+
+    <!-- API Keys -->
+    <section id="api-keys">
+      <h2>API Keys</h2>
+      <p>API keys are only required for the fully automated pipeline (Workflow A). The Cowork and web workflows work without them.</p>
+      <div class="req-grid">
+        <div class="req-card">
+          <div class="req-label">Anthropic</div>
+          <div class="req-name">Claude API</div>
+          <div class="req-detail">Report generation. Free tier available.<br><code style="font-size:11px;">console.anthropic.com/settings/keys</code></div>
+        </div>
+        <div class="req-card">
+          <div class="req-label">Google</div>
+          <div class="req-name">Gemini API</div>
+          <div class="req-detail">Frame text extraction. Free tier: 1,500 req/day.<br><code style="font-size:11px;">aistudio.google.com/apikey</code></div>
+        </div>
+      </div>
+      <p style="margin-top:16px;">Keys are stored in your system keychain (Windows Credential Manager / macOS Keychain) — never in plain text files. To add or update keys after setup:</p>
+      <pre><code>python mip.py setup</code></pre>
+    </section>
+
+    <!-- Troubleshooting -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <div class="faq">
+        <div class="faq-item">
+          <div class="faq-q" onclick="toggleFaq(this)"><code>ffmpeg</code> not found after installing</div>
+          <div class="faq-a">PATH changes require a new terminal session. Close your terminal completely, reopen it, and run <code>ffmpeg -version</code> again. On Windows, also make sure you added the <code>bin</code> subfolder (e.g. <code>C:\ffmpeg\bin</code>), not just <code>C:\ffmpeg</code>.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q" onclick="toggleFaq(this)"><code>python</code> not found on Windows</div>
+          <div class="faq-a">During Python installation, the "Add Python to PATH" checkbox must be checked. If you missed it, uninstall Python and reinstall with that option enabled. Alternatively, use <code>py mip.py setup</code> instead of <code>python mip.py setup</code>.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q" onclick="toggleFaq(this)">Package installation fails during setup</div>
+          <div class="faq-a">Try running the installer again — it retries failed packages. If a specific package keeps failing, install it manually: <code>pip install &lt;package-name&gt;</code>. Common culprits on ARM64 machines: <code>scikit-image</code> and <code>pillow</code> may need Visual C++ Build Tools.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q" onclick="toggleFaq(this)">Keyring error when saving API keys</div>
+          <div class="faq-a">On some minimal Linux installs, the keyring backend is not configured. Install a backend: <code>pip install secretstorage keyrings.alt</code>, then run <code>python mip.py setup</code> again.</div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q" onclick="toggleFaq(this)">Running setup again to change settings</div>
+          <div class="faq-a"><code>python mip.py setup</code> is safe to re-run. It will detect the existing install and ask before overwriting. Your projects and recordings are never affected — only the global config is updated.</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  function switchTab(btn, id) {
+    const section = btn.closest('section');
+    section.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    section.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    section.querySelector('#tab-' + id).classList.add('active');
+  }
+
+  function toggleFaq(el) {
+    el.closest('.faq-item').classList.toggle('open');
+  }
+
+  function toggleTheme() {
+    const root = document.documentElement;
+    const current = root.getAttribute('data-theme');
+    const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    if (!current) root.setAttribute('data-theme', sys === 'dark' ? 'light' : 'dark');
+    else root.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+  }
+
+  // Highlight active nav link on scroll
+  const anchors = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    anchors.forEach(s => { if (window.scrollY >= s.offsetTop - 80) current = s.id; });
+    navLinks.forEach(a => {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+  }, { passive: true });
+</script>
+</body>
+</html>

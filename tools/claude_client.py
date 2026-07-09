@@ -22,7 +22,7 @@ from tools.api_config import get_anthropic_key
 
 log = logging.getLogger("claude_client")
 
-CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 
 def generate_report(
@@ -76,9 +76,16 @@ def generate_report(
 
     # ── User message ──────────────────────────────────────────────────────────
 
-    client_name  = config.get("client", "")
-    project_name = config.get("project", "")
-    context_line = f"Client: {client_name} | Project: {project_name}" if client_name else ""
+    client_name    = config.get("client", "")
+    project_name   = config.get("project", "")
+    client_context = config.get("client_context", "")
+
+    context_parts = []
+    if client_name:
+        context_parts.append(f"Client: {client_name} | Project: {project_name}")
+    if client_context:
+        context_parts.append(f"Client context: {client_context}")
+    context_line = "\n".join(context_parts)
 
     visual_block = (
         f"## VISUAL EVIDENCE (extracted by Gemini from meeting frames)\n\n{visual_evidence}"

@@ -125,6 +125,11 @@ def run_project_new():
         default_key=lang_default_key
     )
 
+    # ── Client context ──
+    print("\n  Optional: add a brief description of the client (industry, tech stack,")
+    print("  relationship history, pain points). This improves report quality.")
+    client_context = _ask("Client description (or Enter to skip)", "")
+
     # ── Custom meeting types ──
     print(f"\n  Base meeting types: {', '.join(MEETING_TYPES_DEFAULT)}")
     custom_raw = _ask(
@@ -150,6 +155,8 @@ def run_project_new():
     project_config = {
         "client": client,
         "project": project_name,
+        "client_context": client_context,
+        "client_context_updated": datetime.now().strftime("%Y-%m-%d") if client_context else "",
         "llm_provider": provider_choice,
         "llm_project_reference": provider_ref,
         "project_folder": str(project_path),
@@ -214,6 +221,37 @@ def run_project_new():
     print(f"\n    Or for web mode (Claude/ChatGPT/Gemini browser):")
     print(f"\n       python mip.py run --path \"{project_path / 'MeetingName_YYYYMMDD'}\" --web")
     print()
+
+
+# ── Project context update ────────────────────────────────────────────────────
+
+def run_project_context(project_folder: Path):
+    config = _load_project_config(project_folder)
+    if not config:
+        _err(f"No mip.config.json found in: {project_folder}")
+        return
+
+    current = config.get("client_context", "")
+    updated = config.get("client_context_updated", "")
+
+    print(f"\n  Client: {config.get('client', '')} — {config.get('project', '')}")
+    if current:
+        print(f"  Current context (updated {updated}):")
+        print(f"    {current}")
+    else:
+        print("  No client context set yet.")
+
+    print("\n  Enter new client description (or Enter to keep current):")
+    new_context = _ask("Client description", current)
+
+    if new_context == current:
+        print("  No changes.")
+        return
+
+    config["client_context"] = new_context
+    config["client_context_updated"] = datetime.now().strftime("%Y-%m-%d") if new_context else ""
+    _write_project_config(project_folder, config)
+    _ok("Client context updated.")
 
 
 # ── Project list ──────────────────────────────────────────────────────────────

@@ -1,7 +1,12 @@
-# MeetingTool v2
+# MeetingTool v3.0
 
 Process Microsoft Teams recordings and generate structured executive reports.
-Supports Claude, ChatGPT, and Gemini. Works on Windows, macOS, and Linux.
+Supports three workflows: automated pipeline (Gemini + Claude API), Cowork
+(Claude Desktop), and web (any LLM browser). Works on Windows, macOS, and Linux.
+
+**Documentation:**
+- [Installation Guide](docs/installation.html) — step-by-step setup for new machines
+- [User Guide](docs/user-guide.html) — workflows, commands, and folder structure reference
 
 ---
 
@@ -9,7 +14,7 @@ Supports Claude, ChatGPT, and Gemini. Works on Windows, macOS, and Linux.
 
 - Python 3.11+
 - ffmpeg in PATH
-- A paid Claude, ChatGPT, or Gemini account
+- For automated pipeline: Anthropic API key + Gemini API key (both have free tiers)
 
 ---
 
@@ -91,26 +96,54 @@ At the end it prints the instructions you need to configure your AI tool — fol
 # Create a project for a new client engagement
 python mip.py project new
 
-# Process a meeting — Cowork workflow (Claude Desktop)
-python mip.py run --path "~/Documents/MeetingTool/projects/Acme/Q2Analysis/KickoffMeeting_20260330"
+# Automated pipeline — Gemini extracts frames, Claude writes the report
+python mip.py run --path "<meeting_folder>" --auto
 
-# Process a meeting — Web workflow (Claude/ChatGPT/Gemini browser)
-python mip.py run --path "..." --web
+# Cowork workflow — Claude Desktop reads frames + transcript directly
+python mip.py run --path "<meeting_folder>"
 
-# Process a long meeting (45+ min) in two-pass web mode
-python mip.py run --path "..." --web --two-pass
+# Web workflow — uploads checklist for any LLM browser
+python mip.py run --path "<meeting_folder>" --web
+
+# Long meeting (45+ min) — two-pass web mode
+python mip.py run --path "<meeting_folder>" --web --two-pass
 
 # Export the approved report to DOCX for client delivery
-python mip.py export --path "..."
+python mip.py export --path "<meeting_folder>"
 ```
 
 ---
 
 ## Workflows
 
-### Workflow A — Cowork (Claude Desktop)
+### Workflow A — Automated pipeline
 
-For developers using Claude Desktop with the Cowork feature.
+Fully hands-off: Gemini extracts visual content from frames, Claude writes the report.
+
+1. Place `MeetingName_YYYYMMDD.mp4` and `MeetingName_YYYYMMDD.docx` in the meeting folder
+2. Run: `python mip.py run --path <folder> --auto`
+3. MeetingTool extracts frames, sends them to Gemini (vision), calls Claude, writes `report_YYYYMMDD.md`
+4. Review the report, iterate if needed
+5. Export: `python mip.py export --path <folder>`
+
+**API keys required:** Anthropic + Gemini (both have free tiers).
+Get them at [console.anthropic.com](https://console.anthropic.com/settings/keys) and [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+The installer saves them to your system keychain during `mip setup`.
+
+**Gemini free tier limits:** 1,500 requests/day, 40,000 tokens/minute.
+For high-volume use, configure a backup key from a separate Google Cloud project:
+run `mip setup` again — it will ask for a second Gemini key (optional).
+When the primary key hits quota, the backup activates automatically.
+
+**Gemini unavailable?** MeetingTool activates an OCR fallback and continues —
+Claude generates the report from transcript only. Report quality is lower without
+visual evidence but the pipeline never blocks.
+
+---
+
+### Workflow B — Cowork (Claude Desktop)
+
+For users running Claude Desktop with the Cowork feature.
 
 1. Place `MeetingName_YYYYMMDD.mp4` and `MeetingName_YYYYMMDD.docx` in the meeting folder
 2. Run `mip run --path <folder>` from Cowork
@@ -118,9 +151,9 @@ For developers using Claude Desktop with the Cowork feature.
 4. Review and iterate on the report in Cowork chat
 5. Run `mip export --path <folder>` when ready for client delivery
 
-### Workflow B — Web (Claude / ChatGPT / Gemini)
+### Workflow C — Web (Claude / ChatGPT / Gemini)
 
-For developers using Claude web, ChatGPT, or Gemini without desktop access.
+For users running Claude web, ChatGPT, or Gemini without desktop access.
 
 **Short meetings (< 45 min):**
 1. Run `mip run --path <folder> --web`
@@ -231,13 +264,16 @@ Custom types can be added per project in `mip.config.json`.
 
 ## Privacy
 
-- Video and transcript **never leave your computer automatically**
-- All LLM uploads are **manual and explicit** — you control what gets shared
-- Each LLM provider has its own data retention policy — review before uploading client content:
-  - Claude: https://www.anthropic.com/privacy
-  - ChatGPT: https://openai.com/policies/privacy-policy
-  - Gemini: https://policies.google.com/privacy
-- SharePoint credentials stored in `.env` (never committed — see `.gitignore`)
+**Automated pipeline (`--auto`):** frames are sent to Google Gemini and the full transcript is sent to Anthropic Claude. Both happen automatically without manual confirmation. Review their data policies before processing confidential client content.
+
+**Cowork and web workflows:** video and transcript never leave your computer automatically — all LLM uploads are manual and explicit.
+
+Data retention policies:
+- Anthropic (Claude): [anthropic.com/privacy](https://www.anthropic.com/privacy)
+- Google (Gemini): [policies.google.com/privacy](https://policies.google.com/privacy)
+- OpenAI (ChatGPT): [openai.com/policies/privacy-policy](https://openai.com/policies/privacy-policy)
+
+API keys are stored in your system keychain (Windows Credential Manager / macOS Keychain) — never in plain text files.
 
 ---
 

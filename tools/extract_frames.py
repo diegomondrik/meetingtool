@@ -19,13 +19,23 @@ Also handles transcript DOCX → .txt parsing (carried over from v1, cleaned up)
 import re
 import logging
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 log = logging.getLogger("extract_frames")
 
-MAX_WIDTH           = 1280
-MAX_HEIGHT          = 720
+MAX_WIDTH              = 1280
+MAX_HEIGHT             = 720
 SSIM_DISCARD_THRESHOLD = 0.95
+TRANSCRIPT_BOOST       = 0.12
+
+VISUAL_REFERENCE_KEYWORDS = [
+    "mirá", "look at", "ver", "acá ven", "el número",
+    "on screen", "right here", "this shows", "notice", "en pantalla",
+    "as you can see", "here you can see", "if you look",
+    "I'm showing", "pointing", "fijate", "acá vemos",
+]
+
+_TS_RE = re.compile(r'^\[(\d{1,2}):(\d{2}):(\d{2})\]', re.MULTILINE)
 
 
 # ── Timestamp utilities ───────────────────────────────────────────────────────
@@ -173,6 +183,55 @@ def composite_score(
     return (z * w_zone) + (e * w_edge) + (t * w_temporal)
 
 
+# ── Transcript boost ──────────────────────────────────────────────────────────
+
+def _transcript_has_visual_ref(transcript_text: str, timestamp: float,
+                                window: float = 30) -> bool:
+    """
+    Return True if a VISUAL_REFERENCE_KEYWORDS keyword appears in the transcript
+    within ±window seconds of the given timestamp.
+    Expects [HH:MM:SS] format as output by parse_transcript_docx.
+    """
+    if not transcript_text:
+        return False
+
+    entries = []
+    for m in _TS_RE.finditer(transcript_text):
+        ts_secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+        entries.append((ts_secs, m.start()))
+
+    if not entries:
+        return False
+
+    lo = timestamp - window
+    hi = timestamp + window
+
+    for i, (ts_secs, pos) in enumerate(entries):
+        if lo <= ts_secs <= hi:
+            end_pos = entries[i + 1][1] if i + 1 < len(entries) else len(transcript_text)
+            block = transcript_text[pos:end_pos].lower()
+            if any(kw.lower() in block for kw in VISUAL_REFERENCE_KEYWORDS):
+                return True
+
+    return False
+
+
+# ── Discard log ───────────────────────────────────────────────────────────────
+
+def _write_discard_log(output_dir: Path, discards: list, run_ts: str) -> None:
+    """
+    Write frames_discarded.log to output_dir.
+    discards: list of (timestamp_float, formatted_suffix_str)
+    """
+    log_path = output_dir / "frames_discarded.log"
+    lines = [
+        f"{run_ts} | {seconds_to_filename_ts(ts)} | {suffix}"
+        for ts, suffix in sorted(discards, key=lambda x: x[0])
+    ]
+    log_path.write_text("\n".join(lines), encoding="utf-8")
+    log.info(f"Discard log: {log_path.name} ({len(lines)} entries)")
+
+
 # ── Main extraction function ──────────────────────────────────────────────────
 
 def extract_frames(
@@ -183,6 +242,7 @@ def extract_frames(
     roi_top: float = 0.15,
     min_gap: float = 3.0,
     min_composite_score: float = 0.15,
+    transcript_text: str = "",
 ) -> int:
     """
     Extract frames using the three-signal composite scoring algorithm.
@@ -236,8 +296,10 @@ def extract_frames(
 
     analyze_interval = 1.0 / fps_analyze  # seconds between sampled frames
 
+    run_ts           = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     prev_gray        = None
     candidates       = []   # list of (timestamp, score, img_rgb ndarray)
+    discards         = []   # list of (timestamp, formatted_suffix) for discard log
     saved_timestamps = []
     last_saved_t     = -min_gap - 1
     last_analyzed_t  = -analyze_interval
@@ -271,20 +333,29 @@ def extract_frames(
             + 0.114 * img_roi[:, :, 2].astype(np.float32)
         ).astype(np.uint8)
 
-        if prev_gray is not None and (timestamp - last_saved_t) >= min_gap:
-            score = composite_score(
-                prev_gray           = prev_gray,
-                curr_gray           = curr_gray,
-                timestamp           = timestamp,
-                duration            = duration_secs,
-                budget              = budget,
-                existing_timestamps = saved_timestamps,
-            )
-
-            if score >= min_composite_score:
-                candidates.append((timestamp, score, img_rgb.copy()))
-                saved_timestamps.append(timestamp)
-                last_saved_t = timestamp
+        if prev_gray is not None:
+            gap = timestamp - last_saved_t
+            if gap < min_gap:
+                discards.append((timestamp, f"motivo=gap_minimo ({gap:.1f}s desde anterior)"))
+            else:
+                score = composite_score(
+                    prev_gray           = prev_gray,
+                    curr_gray           = curr_gray,
+                    timestamp           = timestamp,
+                    duration            = duration_secs,
+                    budget              = budget,
+                    existing_timestamps = saved_timestamps,
+                )
+                if transcript_text and _transcript_has_visual_ref(
+                    transcript_text, timestamp
+                ):
+                    score = min(score + TRANSCRIPT_BOOST, 1.0)
+                if score >= min_composite_score:
+                    candidates.append((timestamp, score, img_rgb.copy()))
+                    saved_timestamps.append(timestamp)
+                    last_saved_t = timestamp
+                else:
+                    discards.append((timestamp, f"score={score:.3f} | motivo=score_bajo"))
 
         prev_gray = curr_gray
 
@@ -303,6 +374,8 @@ def extract_frames(
     if len(candidates) > budget:
         log.info(f"Applying budget: {len(candidates)} → {budget} frames (highest composite score)")
         candidates.sort(key=lambda x: x[1], reverse=True)
+        for i, (ts, score, _) in enumerate(candidates[budget:], start=budget + 1):
+            discards.append((ts, f"motivo=budget_cap (frame {i}, score={score:.3f})"))
         candidates = candidates[:budget]
         candidates.sort(key=lambda x: x[0])
 
@@ -333,6 +406,7 @@ def extract_frames(
             similarity = ssim_fn(prev, curr_gray)
             if similarity > SSIM_DISCARD_THRESHOLD:
                 log.debug(f"  [skip] SSIM={similarity:.3f} > {SSIM_DISCARD_THRESHOLD} — duplicate discarded")
+                discards.append((ts, f"SSIM={similarity:.3f} | motivo=duplicado_perceptual"))
                 continue
 
         saved += 1
@@ -344,13 +418,15 @@ def extract_frames(
         log.info(f"  [{saved:03d}] {filename}  (score={score:.3f})")
 
     log.info(f"✓ {saved} frames saved to: {output_dir}")
+    _write_discard_log(output_dir, discards, run_ts)
     return saved
 
 
 # ── Transcript parsing ────────────────────────────────────────────────────────
 
-_TS_PATTERN  = re.compile(r"\[?\d{1,2}:\d{2}:\d{2}\]?")
-_SPEAKER_TS  = re.compile(r"^(.+?)\s{2,}(\d{1,2}:\d{2}:\d{2})\s*$")
+_TS_PATTERN  = re.compile(r"\[?\d{1,2}:\d{2}(?::\d{2})?\]?")
+# Matches both H:MM:SS and M:SS Teams transcript formats.
+_SPEAKER_TS  = re.compile(r"^(.+?)\s{2,}(\d{1,2}:\d{2}(?::\d{2})?)\s*$")
 
 TEAMS_BOILERPLATE = [
     "microsoft teams meeting",
@@ -377,26 +453,37 @@ def parse_transcript_docx(docx_path: Path, output_folder: Path) -> Path:
     lines = []
 
     for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
+        raw = para.text.strip()
+        if not raw:
             continue
 
-        # Speaker + timestamp line
-        m = _SPEAKER_TS.match(text)
-        if m:
-            speaker, ts = m.group(1).strip(), m.group(2)
-            lines.append(f"\n[{ts}] {speaker}:")
+        # Teams boilerplate — skip entire paragraph
+        if any(bp in raw.lower() for bp in TEAMS_BOILERPLATE):
             continue
 
-        # Standalone timestamp — skip
-        if _TS_PATTERN.fullmatch(text.strip("[]")):
-            continue
+        # Split embedded newlines (Teams DOCX packs speaker+content in one paragraph)
+        sublines = raw.split("\n")
 
-        # Teams boilerplate — skip
-        if any(bp in text.lower() for bp in TEAMS_BOILERPLATE):
-            continue
+        for i, text in enumerate(sublines):
+            text = text.strip()
+            if not text:
+                continue
 
-        lines.append(text)
+            # Speaker + timestamp line (first subline of a block)
+            m = _SPEAKER_TS.match(text)
+            if m:
+                speaker, ts = m.group(1).strip(), m.group(2)
+                parts = ts.split(":")
+                if len(parts) == 2:
+                    ts = f"00:{int(parts[0]):02d}:{int(parts[1]):02d}"
+                lines.append(f"\n[{ts}] {speaker}:")
+                continue
+
+            # Standalone timestamp — skip
+            if _TS_PATTERN.fullmatch(text.strip("[]")):
+                continue
+
+            lines.append(text)
 
     # Collapse multiple blank lines
     cleaned: list[str] = []

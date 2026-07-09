@@ -1,62 +1,56 @@
 """
-tools/api_config.py — MeetingTool v2.5
-=======================================
+tools/api_config.py — MeetingTool
+===================================
 Centralized API key loading for Anthropic and Google Gemini.
 
-In normal use (dev machine): reads from Windows Credential Manager
-via the shared G7 infra/secrets_helper.py.
+Keys are stored in the system keychain (Windows Credential Manager, macOS
+Keychain, or the platform-appropriate secret store) via the `keyring` library.
+They are saved during `mip setup` and never hardcoded or shared.
 
-In frozen binary (PyInstaller): infra/ path is unavailable, so falls
-back to keyring directly using the same service name.
+Each user must set up their own keys. Keys are not shared across machines.
+To add or update a key: run `python mip.py setup` and follow the prompts.
 """
 
-import sys
 import logging
 
 log = logging.getLogger("api_config")
 
-SERVICE_NAME = "G7_Automatizaciones"
-_ANTHROPIC_KEY = "ANTHROPIC_API_KEY"
-_GEMINI_KEY    = "GEMINI_API_KEY"
-
-
-def _load_via_infra(key: str) -> str | None:
-    """Load key through shared infra/secrets_helper (dev environment)."""
-    try:
-        from pathlib import Path
-        # Resolve infra/ relative to this file's location: tools/ → meetingtool/ → project/ → Cowork/
-        cowork_root = Path(__file__).resolve().parents[3]
-        infra_path = str(cowork_root)
-        if infra_path not in sys.path:
-            sys.path.insert(0, infra_path)
-        from infra.secrets_helper import get_secret
-        return get_secret(key)
-    except Exception:
-        return None
-
-
-def _load_via_keyring(key: str) -> str | None:
-    """Load key directly from keyring (frozen binary fallback)."""
-    try:
-        import keyring
-        return keyring.get_password(SERVICE_NAME, key) or None
-    except Exception:
-        return None
+# Keys are looked up in G7_Automatizaciones first (developer machine),
+# then in MeetingTool (end-user install). This lets the developer manage
+# all credentials from secrets_manager.py without duplicating keys,
+# while packaged installs for other users remain self-contained.
+_G7_SERVICE      = "G7_Automatizaciones"
+SERVICE_NAME     = "MeetingTool"
+_ANTHROPIC_KEY   = "ANTHROPIC_API_KEY"
+_GEMINI_KEY      = "GEMINI_API_KEY"
+_GEMINI_KEY_2    = "GEMINI_API_KEY_2"
 
 
 def _load_key(key: str) -> str:
-    """
-    Load a credential by name. Tries infra helper first, then keyring directly.
-    Raises RuntimeError with actionable message if not found.
-    """
-    value = _load_via_infra(key) or _load_via_keyring(key)
-    if value:
-        return value
+    try:
+        import keyring
+        value = keyring.get_password(_G7_SERVICE, key) or keyring.get_password(SERVICE_NAME, key)
+        if value:
+            return value
+    except Exception as e:
+        log.debug(f"keyring error for {key}: {e}")
+
     raise RuntimeError(
-        f"\n[api_config] '{key}' not found in Windows Credential Manager.\n"
-        f"Run: python C:\\Users\\diego\\Documents\\Cowork\\infra\\secrets_manager.py\n"
-        f"Then choose option 3 and enter the value for '{key}'.\n"
+        f"\n[api_config] '{key}' not found in your system keychain.\n"
+        f"Run setup to add it:\n\n"
+        f"    python mip.py setup\n\n"
+        f"You will be prompted to enter your API keys during setup.\n"
+        f"Get your keys at:\n"
+        f"  Anthropic : https://console.anthropic.com/settings/keys\n"
+        f"  Gemini    : https://aistudio.google.com/apikey\n"
     )
+
+
+def save_key(key: str, value: str) -> None:
+    """Save an API key to the MeetingTool keychain entry. Called by mip setup."""
+    import keyring
+    keyring.set_password(SERVICE_NAME, key, value)
+    log.info(f"Key saved to keychain: {key}")
 
 
 def get_anthropic_key() -> str:
@@ -67,9 +61,21 @@ def get_gemini_key() -> str:
     return _load_key(_GEMINI_KEY)
 
 
+def get_gemini_key_2() -> str | None:
+    """Return the backup Gemini key, or None if not configured."""
+    try:
+        import keyring
+        value = (keyring.get_password(_G7_SERVICE, _GEMINI_KEY_2)
+                 or keyring.get_password(SERVICE_NAME, _GEMINI_KEY_2))
+        return value if value else None
+    except Exception as e:
+        log.debug(f"keyring error for {_GEMINI_KEY_2}: {e}")
+        return None
+
+
 def validate_keys() -> dict:
     """
-    Check both keys are present. Returns status dict — does not raise.
+    Check keys are present. Returns status dict — does not raise.
     Used by the GUI to show key status in settings.
     """
     results = {}
@@ -80,4 +86,5 @@ def validate_keys() -> dict:
             results[name] = True
         except RuntimeError:
             results[name] = False
+    results["GEMINI_API_KEY_2"] = get_gemini_key_2() is not None
     return results

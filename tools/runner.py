@@ -29,7 +29,7 @@ from tools.extract_frames import (
 from tools.prompt_generator import generate_meeting_prompt
 from tools.gemini_client import extract_visual_evidence, GeminiUnavailableError
 from tools.claude_client import generate_report, write_report
-from tools.api_config import get_gemini_key, get_anthropic_key
+from tools.api_config import get_gemini_key, get_gemini_key_2, get_anthropic_key
 
 log = logging.getLogger("runner")
 
@@ -355,6 +355,57 @@ def save_handoff(meeting_folder: Path):
     print(f"\n  You can now start Chat 2.")
 
 
+# ── v3.0: Transcript segments for Gemini context ─────────────────────────────
+
+_FRAME_TS_RE = __import__('re').compile(r't(\d{2})-(\d{2})-(\d{2})')
+_TS_BLOCK_RE = __import__('re').compile(r'^\[(\d{1,2}):(\d{2}):(\d{2})\]', __import__('re').MULTILINE)
+
+
+def _build_transcript_segments(txt_path: Path, frame_paths: list,
+                                window: float = 45) -> dict:
+    """
+    Build {frame_global_index (1-based): transcript_snippet} for all frames.
+    Timestamps parsed from frame filenames (frame_NNN_tHH-MM-SS.jpg).
+    Snippet is the transcript text within ±window seconds of the frame, capped at 500 chars.
+    """
+    try:
+        transcript_text = txt_path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+
+    entries = []
+    for m in _TS_BLOCK_RE.finditer(transcript_text):
+        ts_secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+        entries.append((ts_secs, m.start()))
+
+    if not entries:
+        return {}
+
+    result = {}
+    for i, frame_path in enumerate(frame_paths):
+        m = _FRAME_TS_RE.search(frame_path.name)
+        if not m:
+            continue
+        frame_secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+        lo, hi = frame_secs - window, frame_secs + window
+
+        snippets = []
+        for j, (ts_secs, pos) in enumerate(entries):
+            if lo <= ts_secs <= hi:
+                end_pos = entries[j + 1][1] if j + 1 < len(entries) else len(transcript_text)
+                block = transcript_text[pos:end_pos].strip()
+                if block:
+                    snippets.append(block)
+
+        if snippets:
+            combined = " ".join(snippets)
+            if len(combined) > 500:
+                combined = combined[:497] + "..."
+            result[i + 1] = combined
+
+    return result
+
+
 # ── v2.5: OCR fallback ───────────────────────────────────────────────────────
 
 def _ocr_fallback(frame_paths: list[Path]) -> str:
@@ -388,6 +439,25 @@ def _ocr_fallback(frame_paths: list[Path]) -> str:
     return combined
 
 
+# ── Context staleness check ───────────────────────────────────────────────────
+
+def _check_context_staleness(config: dict, staleness_days: int = 90) -> bool:
+    updated_str = config.get("client_context_updated", "")
+    client_context = config.get("client_context", "")
+    if not client_context or not updated_str:
+        return False
+    try:
+        updated = date.fromisoformat(updated_str)
+    except ValueError:
+        return False
+    age = (date.today() - updated).days
+    if age < staleness_days:
+        return False
+    print(f"\n  ⚠  Client context was last updated {age} days ago.")
+    answer = input("  Is it still accurate? (y/n) [y]: ").strip().lower()
+    return answer == "n"
+
+
 # ── v2.5: Workflow A (automated) ─────────────────────────────────────────────
 
 def _run_cowork_automated(
@@ -407,16 +477,21 @@ def _run_cowork_automated(
     log.info(f"Workflow A (automated) | budget: {budget} frames")
     log.info(f"Video: {video_path.name}")
 
-    n_frames    = extract_frames(video_path=video_path, output_dir=frames_dir, budget=budget)
-    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
-
-    # ── Transcript ────────────────────────────────────────────────────────────
+    # ── Transcript first — needed for boost during frame extraction ───────────
     txt_path        = None
     transcript_text = ""
     if transcript_path:
         txt_path        = parse_transcript_docx(transcript_path, meeting_folder)
         transcript_text = txt_path.read_text(encoding="utf-8")
         log.info(f"Transcript: {txt_path.name} ({len(transcript_text)} chars)")
+
+    n_frames    = extract_frames(
+        video_path      = video_path,
+        output_dir      = frames_dir,
+        budget          = budget,
+        transcript_text = transcript_text,
+    )
+    frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
 
     project_lang = config.get("report_language", "english")
     report_lang  = project_lang
@@ -427,9 +502,19 @@ def _run_cowork_automated(
     visual_evidence = ""
     visual_source   = "gemini"
 
+    transcript_segs = {}
+    if txt_path:
+        transcript_segs = _build_transcript_segments(txt_path, frame_paths)
+        log.info(f"Transcript segments built: {len(transcript_segs)} frames with context")
+
     try:
         gemini_key      = get_gemini_key()
-        visual_evidence = extract_visual_evidence(frame_paths, gemini_key)
+        gemini_key_2    = get_gemini_key_2()
+        visual_evidence = extract_visual_evidence(
+            frame_paths, gemini_key,
+            transcript_segments=transcript_segs or None,
+            api_key_2=gemini_key_2,
+        )
         _ok(f"Gemini: {len(visual_evidence)} chars of visual evidence")
 
     except GeminiUnavailableError as exc:
@@ -507,6 +592,8 @@ def run_meeting(
     if not config:
         _warn("No mip.config.json found. Using defaults.")
         config = {"llm_provider": "claude", "report_language": "english"}
+
+    _check_context_staleness(config)
 
     video_path, transcript_path = find_video_and_transcript(meeting_folder)
 

@@ -14,8 +14,14 @@ Usage:
 """
 
 import sys
+import io
 import subprocess
 from pathlib import Path
+
+# Force UTF-8 output on Windows to support unicode characters (✓, →, etc.)
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # Verify Python version at import time
 if sys.version_info < (3, 11):
@@ -118,7 +124,13 @@ def project_list():
     type=int,
     help="Override default frame budget (150 for Cowork, 20 for web).",
 )
-def run(meeting_folder, web, two_pass, single_pass, max_frames):
+@click.option(
+    "--auto",
+    is_flag=True,
+    default=False,
+    help="Automated pipeline: run Gemini + Claude and write report automatically.",
+)
+def run(meeting_folder, web, two_pass, single_pass, max_frames, auto):
     """Process a meeting — extract frames and prepare for LLM analysis."""
     from tools.runner import run_meeting
     run_meeting(
@@ -127,6 +139,7 @@ def run(meeting_folder, web, two_pass, single_pass, max_frames):
         two_pass=two_pass,
         single_pass=single_pass,
         max_frames_override=max_frames,
+        automated_pipeline=auto,
     )
 
 

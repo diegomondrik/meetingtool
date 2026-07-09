@@ -559,33 +559,161 @@ class TestDocxExport:
         assert len(resolved) == 0
 
 
+# ── Test: v3.0 Embedding criterion ───────────────────────────────────────────
+
+class TestEmbeddingCriterion:
+
+    def test_old_criterion_removed(self):
+        """The old 'adjacent frame' criterion must no longer appear in BASE_SYSTEM."""
+        from tools.prompt_generator import BASE_SYSTEM
+        assert "not already covered by an adjacent frame" not in BASE_SYSTEM, (
+            "Old embedding criterion must be replaced — 'not already covered by an adjacent frame' "
+            "still present in BASE_SYSTEM"
+        )
+
+    def test_new_criterion_present(self):
+        """BASE_SYSTEM must instruct Claude to embed when transcript did NOT capture the info."""
+        from tools.prompt_generator import BASE_SYSTEM
+        assert "transcript did NOT capture" in BASE_SYSTEM, (
+            "New embedding criterion missing: 'transcript did NOT capture' not found in BASE_SYSTEM"
+        )
+
+    def test_illegible_surfacing_instruction_present(self):
+        """BASE_SYSTEM must instruct Claude to surface [ILLEGIBLE] frames rather than skip them."""
+        from tools.prompt_generator import BASE_SYSTEM
+        assert "visual content present but not fully extractable" in BASE_SYSTEM, (
+            "ILLEGIBLE surfacing instruction missing from BASE_SYSTEM"
+        )
+
+    def test_minimum_frame_conditional_on_screen_sharing(self):
+        """The per-10-min minimum must be conditioned on active screen sharing."""
+        from tools.prompt_generator import BASE_SYSTEM
+        assert "camera-only" in BASE_SYSTEM, (
+            "Minimum frame rule must exclude camera-only segments — 'camera-only' not found"
+        )
+
+
+# ── Test: v3.0 Gemini prompt improvements ────────────────────────────────────
+
+class TestGeminiPrompt:
+
+    def test_illegible_instruction_in_prompt(self):
+        """VISION_PROMPT must instruct Gemini to mark unclear text as [ILLEGIBLE]."""
+        from tools.gemini_client import VISION_PROMPT
+        assert "[ILLEGIBLE]" in VISION_PROMPT, (
+            "[ILLEGIBLE] instruction missing from VISION_PROMPT"
+        )
+
+    def test_visual_signals_instruction_in_prompt(self):
+        """VISION_PROMPT must instruct Gemini to capture color-coded and prominent elements."""
+        from tools.gemini_client import VISION_PROMPT
+        assert "red/green/orange" in VISION_PROMPT or "alert states" in VISION_PROMPT, (
+            "Color-coding / alert states instruction missing from VISION_PROMPT"
+        )
+        assert "visually prominent" in VISION_PROMPT or "visual emphasis" in VISION_PROMPT, (
+            "Visual prominence instruction missing from VISION_PROMPT"
+        )
+
+    def test_transcript_segment_injected(self, tmp_path):
+        """When transcript_segments is provided, the snippet must appear before its image."""
+        import numpy as np
+        from PIL import Image
+        from tools.gemini_client import _build_payload, CHUNK_SIZE
+
+        # Create 3 minimal JPEG frames
+        frames = []
+        for i in range(3):
+            img = Image.fromarray(np.full((72, 128, 3), (i * 80, 100, 150), dtype=np.uint8), "RGB")
+            p = tmp_path / f"frame_{i+1:03d}_t00-0{i}-00.jpg"
+            img.save(str(p), "JPEG")
+            frames.append(p)
+
+        # Frame global index 2 (1-based) gets a transcript snippet
+        transcript_segments = {2: "Randy: I want to understand where the inputs come from."}
+
+        payload = _build_payload(frames, chunk_index=0,
+                                 transcript_segments=transcript_segments)
+        parts = payload["contents"][0]["parts"]
+
+        # Find the index of the frame-2 label and the speaker context
+        frame2_label_idx = next(
+            i for i, p in enumerate(parts)
+            if isinstance(p.get("text"), str) and "FRAME 2" in p["text"]
+        )
+        context_part = parts[frame2_label_idx + 1]
+        image_part   = parts[frame2_label_idx + 2]
+
+        assert "Speaker context" in context_part.get("text", ""), (
+            "Transcript snippet must appear immediately after frame label"
+        )
+        assert "Randy" in context_part["text"], (
+            "Snippet content must be preserved verbatim"
+        )
+        assert "inline_data" in image_part, (
+            "Image must follow immediately after the transcript context"
+        )
+
+    def test_no_transcript_segment_when_not_provided(self, tmp_path):
+        """Without transcript_segments, payload must contain label → image (no extra parts)."""
+        import numpy as np
+        from PIL import Image
+        from tools.gemini_client import _build_payload
+
+        img = Image.fromarray(np.full((72, 128, 3), (100, 100, 100), dtype=np.uint8), "RGB")
+        p = tmp_path / "frame_001_t00-00-00.jpg"
+        img.save(str(p), "JPEG")
+
+        payload = _build_payload([p], chunk_index=0, transcript_segments=None)
+        parts = payload["contents"][0]["parts"]
+
+        # parts: [prompt_text, frame_label, inline_data] — exactly 3
+        assert len(parts) == 3, (
+            f"Without transcript_segments, payload must have 3 parts (prompt+label+image), got {len(parts)}"
+        )
+        assert "inline_data" in parts[2], "Third part must be the image"
+
+
 # ── Test: v2.5 API config ────────────────────────────────────────────────────
 
 class TestApiConfig:
 
-    def test_loads_both_keys(self):
-        """Both API keys must be retrievable from Windows Credential Manager."""
-        from tools.api_config import validate_keys
-        status = validate_keys()
-        assert status.get("ANTHROPIC_API_KEY"), (
-            "ANTHROPIC_API_KEY not found. Run secrets_manager.py option 3."
-        )
-        assert status.get("GEMINI_API_KEY"), (
-            "GEMINI_API_KEY not found. Run secrets_manager.py option 3."
-        )
+    def test_loads_key_from_keyring(self, monkeypatch):
+        """_load_key returns the value stored in keyring."""
+        import keyring
+        from tools.api_config import _load_key, SERVICE_NAME
+
+        monkeypatch.setattr(keyring, "get_password",
+                            lambda svc, key: "sk-test-123" if svc == SERVICE_NAME else None)
+        assert _load_key("ANTHROPIC_API_KEY") == "sk-test-123"
 
     def test_missing_key_raises_runtime_error(self, monkeypatch):
-        """A missing key must raise RuntimeError with an actionable message."""
+        """A missing key must raise RuntimeError pointing to mip setup."""
         import keyring
         from tools.api_config import _load_key
 
         monkeypatch.setattr(keyring, "get_password", lambda *_: None)
 
-        import tools.api_config as ac
-        monkeypatch.setattr(ac, "_load_via_infra", lambda k: None)
-
-        with pytest.raises(RuntimeError, match="secrets_manager.py"):
+        with pytest.raises(RuntimeError, match="mip.py setup"):
             _load_key("NONEXISTENT_KEY")
+
+    def test_get_gemini_key_2_returns_value_when_set(self, monkeypatch):
+        """get_gemini_key_2 returns the backup key when stored in keyring."""
+        import keyring
+        from tools.api_config import get_gemini_key_2, SERVICE_NAME
+
+        monkeypatch.setattr(
+            keyring, "get_password",
+            lambda svc, key: "backup-key-456" if key == "GEMINI_API_KEY_2" else None
+        )
+        assert get_gemini_key_2() == "backup-key-456"
+
+    def test_get_gemini_key_2_returns_none_when_absent(self, monkeypatch):
+        """get_gemini_key_2 returns None when no backup key is stored."""
+        import keyring
+        from tools.api_config import get_gemini_key_2
+
+        monkeypatch.setattr(keyring, "get_password", lambda *_: None)
+        assert get_gemini_key_2() is None
 
 
 # ── Test: v2.5 Claude client ─────────────────────────────────────────────────
@@ -668,12 +796,13 @@ class TestGeminiClient:
             frames.append(p)
         return frames
 
-    def test_chunks_150_frames_into_4(self, tmp_path):
-        """150 frames must produce 4 chunks of ≤37 frames each."""
+    def test_chunks_150_frames(self, tmp_path):
+        """150 frames must produce ceil(150/CHUNK_SIZE) chunks, all ≤ CHUNK_SIZE."""
+        import math
         from tools.gemini_client import CHUNK_SIZE
         frames = self._make_frames(tmp_path, 150)
         chunks = [frames[i: i + CHUNK_SIZE] for i in range(0, len(frames), CHUNK_SIZE)]
-        assert len(chunks) == 4
+        assert len(chunks) == math.ceil(150 / CHUNK_SIZE)
         assert all(len(c) <= CHUNK_SIZE for c in chunks)
         assert sum(len(c) for c in chunks) == 150
 
@@ -732,11 +861,193 @@ class TestGeminiClient:
         with pytest.raises(gc.GeminiUnavailableError):
             gc.extract_visual_evidence(frames, "fake-key")
 
+    def test_fallback_key2_used_when_key1_exhausted(self, tmp_path, monkeypatch):
+        """When key 1 hits 429 after retry, key 2 must be tried and succeed."""
+        import requests
+        import tools.gemini_client as gc
+
+        calls = []
+
+        def mock_post(payload, api_key):
+            calls.append(api_key)
+            if api_key == "key-1":
+                mock_resp = type("R", (), {"status_code": 429})()
+                raise requests.HTTPError("429", response=mock_resp)
+            return "evidence from key 2"
+
+        monkeypatch.setattr(gc, "_post_chunk", mock_post)
+        monkeypatch.setattr(gc, "CHUNK_DELAY", 0)
+        monkeypatch.setattr(gc, "RETRY_DELAY", 0)
+
+        frames = self._make_frames(tmp_path, 3)
+        result = gc.extract_visual_evidence(frames, "key-1", api_key_2="key-2")
+        assert result == "evidence from key 2"
+        assert "key-2" in calls
+
+    def test_fallback_key2_absent_raises_unavailable(self, tmp_path, monkeypatch):
+        """When key 2 is not configured and key 1 is exhausted, must raise GeminiUnavailableError."""
+        import requests
+        import tools.gemini_client as gc
+
+        def mock_post(payload, api_key):
+            mock_resp = type("R", (), {"status_code": 429})()
+            raise requests.HTTPError("429", response=mock_resp)
+
+        monkeypatch.setattr(gc, "_post_chunk", mock_post)
+        monkeypatch.setattr(gc, "CHUNK_DELAY", 0)
+        monkeypatch.setattr(gc, "RETRY_DELAY", 0)
+
+        frames = self._make_frames(tmp_path, 3)
+        with pytest.raises(gc.GeminiUnavailableError):
+            gc.extract_visual_evidence(frames, "key-1", api_key_2=None)
+
+    def test_fallback_key2_also_fails_raises_unavailable(self, tmp_path, monkeypatch):
+        """When both keys hit 429, must raise GeminiUnavailableError."""
+        import requests
+        import tools.gemini_client as gc
+
+        def mock_post(payload, api_key):
+            mock_resp = type("R", (), {"status_code": 429})()
+            raise requests.HTTPError("429", response=mock_resp)
+
+        monkeypatch.setattr(gc, "_post_chunk", mock_post)
+        monkeypatch.setattr(gc, "CHUNK_DELAY", 0)
+        monkeypatch.setattr(gc, "RETRY_DELAY", 0)
+
+        frames = self._make_frames(tmp_path, 3)
+        with pytest.raises(gc.GeminiUnavailableError):
+            gc.extract_visual_evidence(frames, "key-1", api_key_2="key-2")
+
     def test_empty_frames_returns_empty_string(self, tmp_path):
         """No frames must return empty string without calling Gemini."""
         from tools.gemini_client import extract_visual_evidence
         result = extract_visual_evidence([], "fake-key")
         assert result == ""
+
+
+# ── Test: v3.0 Transcript boost / discard log ────────────────────────────────
+
+class TestTranscriptBoost:
+
+    def test_discard_log_created(self, synthetic_video, tmp_path):
+        """Full extraction run must generate frames_discarded.log with valid entries."""
+        from tools.extract_frames import extract_frames as ef
+
+        out_dir = tmp_path / "imagenes_reunion"
+        out_dir.mkdir()
+
+        ef(video_path=synthetic_video, output_dir=out_dir, budget=5, fps_analyze=2.0)
+
+        log_path = out_dir / "frames_discarded.log"
+        assert log_path.exists(), "frames_discarded.log must be created after extraction"
+
+        content = log_path.read_text(encoding="utf-8")
+        lines = [l for l in content.splitlines() if l.strip()]
+        assert len(lines) >= 1, "Log must have at least one discard entry"
+
+        first = lines[0]
+        assert " | " in first, f"Expected pipe-delimited format, got: {first}"
+        assert "motivo=" in first, f"Expected motivo= field in entry, got: {first}"
+
+    def test_discard_log_records_score_bajo(self, tmp_path):
+        """Frames below min_composite_score must appear in the log as score_bajo."""
+        import numpy as np
+        from tools.extract_frames import _write_discard_log, seconds_to_filename_ts
+
+        out_dir = tmp_path / "imagenes_reunion"
+        out_dir.mkdir()
+
+        discards = [
+            (45.0, "score=0.08 | motivo=score_bajo"),
+            (90.0, "score=0.11 | motivo=score_bajo"),
+        ]
+        _write_discard_log(out_dir, discards, "2026-06-18T10:00:00")
+
+        content = (out_dir / "frames_discarded.log").read_text(encoding="utf-8")
+        assert "score_bajo" in content
+        assert "score=0.08" in content
+        assert "score=0.11" in content
+
+    def test_discard_log_records_budget_cap(self, tmp_path):
+        """Frames removed by budget cap must appear in the log as budget_cap."""
+        from tools.extract_frames import _write_discard_log
+
+        out_dir = tmp_path / "imagenes_reunion"
+        out_dir.mkdir()
+
+        discards = [(120.0, "motivo=budget_cap (frame 151, score=0.23)")]
+        _write_discard_log(out_dir, discards, "2026-06-18T10:00:00")
+
+        content = (out_dir / "frames_discarded.log").read_text(encoding="utf-8")
+        assert "budget_cap" in content
+        assert "frame 151" in content
+
+    def test_boost_applied_when_visual_ref_present(self):
+        """Score must increase by TRANSCRIPT_BOOST when visual ref keyword is in window."""
+        from tools.extract_frames import _transcript_has_visual_ref, TRANSCRIPT_BOOST
+
+        transcript = (
+            "[00:00:55] Odeta Pine:\n"
+            "If you look at this diagram, mirá esto aquí.\n\n"
+            "[00:01:10] Randy:\nGot it, makes sense."
+        )
+        assert _transcript_has_visual_ref(transcript, 60.0, window=30), (
+            "Expected True: visual keyword 'mirá' is within ±30s of t=60s"
+        )
+
+    def test_no_boost_without_visual_ref(self):
+        """Score must not change when no visual ref keyword is near the timestamp."""
+        from tools.extract_frames import _transcript_has_visual_ref
+
+        transcript = (
+            "[00:00:55] Odeta Pine:\n"
+            "The data architecture has three distinct layers.\n\n"
+            "[00:01:10] Randy:\nUnderstood, thank you."
+        )
+        assert not _transcript_has_visual_ref(transcript, 60.0, window=30), (
+            "Expected False: no visual reference keyword in transcript window"
+        )
+
+    def test_boost_not_applied_outside_window(self):
+        """Visual ref keyword far from frame timestamp must not trigger boost."""
+        from tools.extract_frames import _transcript_has_visual_ref
+
+        transcript = (
+            "[00:00:10] Odeta Pine:\n"
+            "Look at this dashboard on screen.\n\n"
+            "[00:05:00] Randy:\nAnd this other topic."
+        )
+        # t=300s, window=30 → only [00:04:30..00:05:30] qualifies → keyword at t=10 is excluded
+        assert not _transcript_has_visual_ref(transcript, 300.0, window=30), (
+            "Expected False: visual keyword at t=10s is outside ±30s window of t=300s"
+        )
+
+    def test_boost_empty_transcript_returns_false(self):
+        """Empty transcript must never trigger boost."""
+        from tools.extract_frames import _transcript_has_visual_ref
+        assert not _transcript_has_visual_ref("", 60.0), (
+            "Expected False for empty transcript"
+        )
+
+    def test_discard_log_sorted_chronologically(self, tmp_path):
+        """Discard log entries must be sorted by timestamp, not insertion order."""
+        from tools.extract_frames import _write_discard_log
+
+        out_dir = tmp_path / "imagenes_reunion"
+        out_dir.mkdir()
+
+        # Insert out of order
+        discards = [
+            (300.0, "motivo=gap_minimo (2.1s desde anterior)"),
+            (60.0,  "score=0.10 | motivo=score_bajo"),
+            (180.0, "SSIM=0.97 | motivo=duplicado_perceptual"),
+        ]
+        _write_discard_log(out_dir, discards, "2026-06-18T10:00:00")
+
+        lines = (out_dir / "frames_discarded.log").read_text(encoding="utf-8").splitlines()
+        assert "score_bajo" in lines[0], "First entry (t=60s) should be score_bajo"
+        assert "duplicado_perceptual" in lines[1], "Second entry (t=180s) should be duplicado_perceptual"
+        assert "gap_minimo" in lines[2], "Third entry (t=300s) should be gap_minimo"
 
 
 # ── Test: v2.5 Frame optimization ────────────────────────────────────────────
@@ -856,7 +1167,7 @@ class TestRunnerAutomated:
 
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
         monkeypatch.setattr(runner, "extract_visual_evidence",
-                            lambda paths, key: "Mock visual evidence from 3 frames.")
+                            lambda paths, key, **kw: "Mock visual evidence from 3 frames.")
         monkeypatch.setattr(runner, "get_gemini_key", lambda: "fake-gemini-key")
         monkeypatch.setattr(runner, "generate_report",
                             lambda **kwargs: "# Meeting Report\n\nContent.")
@@ -887,7 +1198,7 @@ class TestRunnerAutomated:
             self._make_frames_in(output_dir, 2)
             return 2
 
-        def fake_gemini(paths, key):
+        def fake_gemini(paths, key, **kw):
             raise GeminiUnavailableError("rate limited after retry")
 
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
@@ -939,7 +1250,7 @@ class TestRunnerAutomated:
 
         monkeypatch.setattr(runner, "extract_frames", fake_extract_frames)
         monkeypatch.setattr(runner, "extract_visual_evidence",
-                            lambda paths, key: "evidence")
+                            lambda paths, key, **kw: "evidence")
         monkeypatch.setattr(runner, "get_gemini_key", lambda: "k")
         monkeypatch.setattr(runner, "generate_report",
                             lambda **kwargs: "# Report")
@@ -958,3 +1269,90 @@ class TestRunnerAutomated:
 
         assert result.report_path.parent == tmp_path
         assert result.report_path.name.startswith("report_")
+
+
+# ── Test: Inc 4 — Client context ──────────────────────────────────────────────
+
+class TestClientContext:
+
+    def test_client_context_saved_to_config(self, tmp_path, monkeypatch):
+        """client_context and client_context_updated written to project config."""
+        import json
+        import tools.project as project
+
+        answers = iter([
+            "AcmeCorp",           # client name
+            "Q2Analysis",         # project name
+            str(tmp_path),        # project folder path
+            "",                   # provider ref (_ask_choice for provider is patched separately)
+            "Retail, 500 employees, SAP stack.",  # client_context
+            "",                   # custom meeting types
+        ])
+        monkeypatch.setattr("tools.project._ask", lambda prompt, default="": next(answers))
+        monkeypatch.setattr("tools.project._ask_choice", lambda prompt, opts, default_key=None: list(opts.values())[int(default_key or "0") - 1])
+        monkeypatch.setattr("tools.project._load_global_config", lambda: {
+            "mip_root": str(tmp_path), "llm_provider": "claude", "default_language": "english"
+        })
+        monkeypatch.setattr("tools.project.generate_prompt_pack", lambda cfg: "prompt")
+
+        project.run_project_new()
+
+        cfg_path = tmp_path / "mip.config.json"
+        assert cfg_path.exists()
+        cfg = json.loads(cfg_path.read_text())
+        assert cfg["client_context"] == "Retail, 500 employees, SAP stack."
+        assert cfg["client_context_updated"] != ""
+
+    def test_client_context_optional(self, tmp_path, monkeypatch):
+        """Empty client_context leaves client_context as empty string, not error."""
+        import json
+        import tools.project as project
+
+        answers = iter([
+            "AcmeCorp", "Q2Analysis", str(tmp_path), "", "", "",
+        ])
+        monkeypatch.setattr("tools.project._ask", lambda prompt, default="": next(answers))
+        monkeypatch.setattr("tools.project._ask_choice", lambda prompt, opts, default_key=None: list(opts.values())[int(default_key or "0") - 1])
+        monkeypatch.setattr("tools.project._load_global_config", lambda: {
+            "mip_root": str(tmp_path), "llm_provider": "claude", "default_language": "english"
+        })
+        monkeypatch.setattr("tools.project.generate_prompt_pack", lambda cfg: "prompt")
+
+        project.run_project_new()
+
+        cfg = json.loads((tmp_path / "mip.config.json").read_text())
+        assert cfg["client_context"] == ""
+        assert cfg["client_context_updated"] == ""
+
+    def test_staleness_warning_triggered(self):
+        """_check_context_staleness returns True (stale) when >90 days old."""
+        from datetime import date, timedelta
+        from tools.runner import _check_context_staleness
+        import io, sys
+
+        old_date = (date.today() - timedelta(days=91)).isoformat()
+        config = {"client_context": "Some context.", "client_context_updated": old_date}
+
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            import builtins
+            original_input = builtins.input
+            builtins.input = lambda _: "n"
+            result = _check_context_staleness(config)
+            builtins.input = original_input
+        finally:
+            sys.stdout = sys.__stdout__
+
+        assert result is True
+
+    def test_no_warning_under_90_days(self):
+        """_check_context_staleness returns False when <=90 days old."""
+        from datetime import date, timedelta
+        from tools.runner import _check_context_staleness
+
+        recent_date = (date.today() - timedelta(days=45)).isoformat()
+        config = {"client_context": "Some context.", "client_context_updated": recent_date}
+
+        result = _check_context_staleness(config)
+        assert result is False

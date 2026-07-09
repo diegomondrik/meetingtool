@@ -13,6 +13,7 @@ import json
 import shutil
 import subprocess
 import platform
+from getpass import getpass
 from pathlib import Path
 from datetime import datetime
 
@@ -26,6 +27,7 @@ REQUIRED_PACKAGES = [
     "pillow",
     "click",
     "requests",
+    "keyring",
 ]
 
 IMPORT_CHECK = {
@@ -35,6 +37,7 @@ IMPORT_CHECK = {
     "pillow":        "PIL",
     "click":         "click",
     "requests":      "requests",
+    "keyring":       "keyring",
 }
 
 # Fallback packages to try if primary install fails
@@ -426,6 +429,77 @@ def detect_existing_install() -> dict | None:
     return None
 
 
+# ── API key setup ─────────────────────────────────────────────────────────────
+
+def setup_api_keys() -> dict:
+    """
+    Prompt for Anthropic and Gemini API keys and save them to the system
+    keychain via keyring. Both are optional (Enter to skip).
+
+    Returns dict with keys 'anthropic' and 'gemini', each True/False/None
+    (True=saved, False=skipped, None=keyring unavailable).
+    """
+    from tools.api_config import save_key, SERVICE_NAME
+
+    print(
+        "\n  MeetingTool's automated pipeline uses two API keys:\n"
+        "    • Anthropic (Claude) — generates the meeting report\n"
+        "    • Gemini (Google)    — extracts text from screen captures\n"
+        "\n  Both are free to obtain. Each person needs their own keys.\n"
+        "  Get them here:\n"
+        "    Anthropic : https://console.anthropic.com/settings/keys\n"
+        "    Gemini    : https://aistudio.google.com/apikey\n"
+        "\n  Keys are stored in your system keychain — never in plain text.\n"
+        "  Press Enter to skip a key if you don't have it yet.\n"
+        "  You can run 'mip setup' again at any time to add or update keys.\n"
+    )
+
+    results = {"anthropic": False, "gemini": False, "gemini_2": False}
+
+    try:
+        import keyring as _kr
+    except ImportError:
+        _warn("keyring not available — API keys cannot be saved securely.")
+        _warn("Run: pip install keyring, then run 'mip setup' again.")
+        return {"anthropic": None, "gemini": None}
+
+    # ── Anthropic key ──
+    print("  Anthropic API key (input hidden):")
+    anthropic_raw = getpass("  Key: ").strip()
+    if anthropic_raw:
+        save_key("ANTHROPIC_API_KEY", anthropic_raw)
+        _ok("Anthropic key saved to keychain.")
+        results["anthropic"] = True
+    else:
+        _warn("Anthropic key skipped. Automated report generation will not work.")
+
+    # ── Gemini key ──
+    print("\n  Gemini API key (input hidden):")
+    gemini_raw = getpass("  Key: ").strip()
+    if gemini_raw:
+        save_key("GEMINI_API_KEY", gemini_raw)
+        _ok("Gemini key saved to keychain.")
+        results["gemini"] = True
+    else:
+        _warn("Gemini key skipped. Visual frame extraction will not work.")
+
+    # ── Gemini backup key (optional) ──
+    print(
+        "\n  Gemini backup key (optional — used as fallback when key 1 hits quota):\n"
+        "  Create a second free key at https://aistudio.google.com/apikey\n"
+        "  Press Enter to skip."
+    )
+    gemini_raw_2 = getpass("  Backup key: ").strip()
+    if gemini_raw_2:
+        save_key("GEMINI_API_KEY_2", gemini_raw_2)
+        _ok("Gemini backup key saved to keychain.")
+        results["gemini_2"] = True
+    else:
+        _warn("Gemini backup key skipped (optional — pipeline works without it).")
+
+    return results
+
+
 # ── Main setup flow ───────────────────────────────────────────────────────────
 
 def run_setup():
@@ -503,23 +577,27 @@ def run_setup():
         default_key="1"
     )
 
-    # ── Step 5: Folder structure ──
-    _print_step(5, "Folder structure")
+    # ── Step 5: API keys ──
+    _print_step(5, "API keys")
+    key_results = setup_api_keys()
+
+    # ── Step 6: Folder structure ──
+    _print_step(6, "Folder structure")
     folders_ok = create_folder_structure(mip_root)
     if not folders_ok:
         print("\n  Setup failed. Check permissions and try again.")
         sys.exit(1)
 
-    # ── Step 6: Test video ──
-    _print_step(6, "Test video fixture")
+    # ── Step 7: Test video ──
+    _print_step(7, "Test video fixture")
     if ffmpeg_ok:
         test_video_path = mip_root / "tools" / "test_meeting.mp4"
         generate_test_video(test_video_path)
     else:
         _warn("Skipping test video (ffmpeg not available)")
 
-    # ── Step 7: Write global config ──
-    _print_step(7, "Global config")
+    # ── Step 8: Write global config ──
+    _print_step(8, "Global config")
     config = {
         "mip_version": "2.0",
         "mip_root": str(mip_root),
@@ -531,8 +609,8 @@ def run_setup():
     }
     _write_global_config(config)
 
-    # ── Step 8: Windows launcher ──
-    _print_step(8, "Windows launcher")
+    # ── Step 9: Windows launcher ──
+    _print_step(9, "Windows launcher")
     create_launcher()
 
     # ── Done ──
@@ -556,6 +634,10 @@ def run_setup():
         issues.append("ffmpeg not installed — frame extraction disabled")
     if not deps_ok:
         issues.append("some Python packages missing — run pip install manually")
+    if key_results.get("anthropic") is False:
+        issues.append("Anthropic key missing — run 'mip setup' to add it")
+    if key_results.get("gemini") is False:
+        issues.append("Gemini key missing — run 'mip setup' to add it")
     if issues:
         print("  Warnings to resolve:")
         for issue in issues:
