@@ -7,6 +7,7 @@ python-docx==1.2.0       # DOCX export
 scikit-image==0.26.0     # SSIM frame de-duplication
 numpy==2.4.6             # frame math (Sobel, SSIM)
 pillow==12.2.0           # image resize / processing
+av==17.0.1               # video decoding for frame extraction (PyAV)
 requests==2.34.2         # HTTP (Gemini REST client)
 keyring==25.7.0          # Windows Credential Manager access
 click==8.4.1             # mip.py CLI
